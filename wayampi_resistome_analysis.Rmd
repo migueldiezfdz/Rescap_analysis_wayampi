@@ -1,0 +1,2715 @@
+---
+title: "GUAYANA PAPER 90"
+output:
+  html_document:
+    code_folding: hide
+    fig_caption: yes
+    number_sections: yes
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    number_sections: yes
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+```{r Cargar librerias,echo=FALSE,warning=FALSE,message=FALSE, include=FALSE}
+library(Hmisc)
+library("MASS")
+library("vegan")
+library("Rtsne")
+library("factoextra")
+library("umap")
+library("gridExtra")
+library("grid")
+library("DESeq2")
+library("pheatmap")
+library("tidyverse")
+library("plotly")
+library("DT")
+library("viridis")
+library("ggsci")
+library("readxl")
+library('phyloseq')
+library('microbial')
+library('reshape2')
+library("ggnewscale")
+library('ggpubr')
+library('microbiome')
+library('broom')
+library('ggrepel')
+library('foreach')
+library('doParallel')
+library('modelbased')
+library('furrr')
+library("ggstatsplot")
+library("ggsci")
+
+```
+
+# Load Rarefaction {.tabset .tabset-fade .tabset-pills}
+
+```{r rarefaction,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_inicial <- read_tsv("/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/tabla_inicial_rarefaccion_90.tsv")
+Tabla_inicial_info <- read_tsv("/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/tabla_inicial_info_90.tsv")
+Tabla_metal_biocide <- read_tsv("/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/Tabla_metal_biocide_90.tsv")
+tabla_bowtie <- read_csv('/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/bowtie_1_lines.txt',col_names = F)
+tabla_lines <- read_csv('/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/bowtie_names.txt',col_names = F)
+tabla_label <- read_tsv('/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/name_rosetta.tsv')
+Tabla_inicial_prev <- read_tsv('/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/Tabla_inicial_prev.tsv')
+Bac_met_pred <- read_tsv('/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/Bac_met_pred.tsv')
+tabla_metadata <- read_csv('/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/metadata_original_sin_titulo_antibioticos.csv')
+tabla_metadata_bin <- read_csv('/Users/miguel/MEGA/Documentos_dropbox/Datos_investigacion/guayana/tablas/metadata_original_sin_titulo_antibioticos_cerounos.csv')
+
+Tabla_inicial_info_old <- Tabla_inicial_info %>% select(template, template_gene:NCBI_annotation) %>% distinct()
+
+Tabla_inicial_ABR_info <-  Tabla_inicial %>% filter(database=="ABR") %>% left_join(., Tabla_inicial_info_old, by = 'template')
+
+Tabla_inicial_BAC_pred_filt_info <-  Tabla_inicial %>% filter(database=="BAC") 
+Tabla_inicial_BAC_pred_filt_info <-  rename(Tabla_inicial_BAC_pred_filt_info, template_gene =template)
+Tabla_inicial_BAC_pred_filt_info <-Tabla_inicial_BAC_pred_filt_info %>%  left_join(.,Tabla_inicial_info_old, by = 'template_gene')
+
+Tabla_inicial_REL_info <-  Tabla_inicial %>% filter(database=="REL")
+
+Tabla_inicial_info <- bind_rows(Tabla_inicial_ABR_info,Tabla_inicial_BAC_pred_filt_info, Tabla_inicial_REL_info) %>% distinct()
+
+Tabla_inicial <- Tabla_inicial %>% filter(database != "REL")
+Tabla_inicial_info <- Tabla_inicial_info %>% filter(database != "REL")
+
+```
+
+# Diversity index {.tabset .tabset-fade .tabset-pills}
+
+```{r Shannon diversity treatment,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+Tabla_gral <- Tabla_inicial %>% select(template, depth, label) %>% spread(template,depth, fill = 0) %>%  
+  column_to_rownames("label") %>% t(.) %>% otu_table(taxa_are_rows = T)
+Tabla_ABR <- Tabla_inicial %>% filter (database=="ABR") %>%  select(template, depth, label) %>% spread(template,depth, fill = 0) %>%  
+  column_to_rownames("label") %>% t(.) %>% otu_table(taxa_are_rows = T)
+Tabla_BAC <- Tabla_inicial %>% filter (database=="BAC") %>%  select(template, depth, label) %>% spread(template,depth, fill = 0) %>%  
+  column_to_rownames("label") %>% t(.) %>% otu_table(taxa_are_rows = T)
+
+Tabla_BAC_Metal <- Tabla_inicial %>% filter(database == 'BAC') %>% left_join(.,Tabla_metal_biocide, by = 'template')  %>% filter(database_BAC == "BAC_Metal")  %>%  group_by(template, label, origin,database) %>% summarise(depth = max(depth))%>% ungroup() %>% select(template, depth, label) %>% spread(template,depth, fill = 0) %>% column_to_rownames("label") %>% t(.) %>% otu_table(taxa_are_rows = T)
+Tabla_BAC_Biocide <-  Tabla_inicial %>%  filter(database == 'BAC') %>% left_join(.,Tabla_metal_biocide, by = 'template')  %>%  filter(database_BAC == "BAC_Biocide") %>%  group_by(template, label, origin,database) %>% summarise(depth = max(depth))%>% ungroup() %>% select(template, depth, label) %>% spread(template,depth, fill = 0) %>% column_to_rownames("label") %>% t(.) %>% otu_table(taxa_are_rows = T)
+
+diver_gral <- alpha(Tabla_gral, index = c("Shannon", "Chao1", "Simpson"))  %>%
+  rename(shannon_gral= "diversity_shannon", chao_gral = 'chao1', dominance.simpson_gral = 'dominance_simpson', evenness.simpson_gral = 'evenness_simpson' ) %>%
+  rownames_to_column(.,var="label")
+
+diver_gral <- alpha(Tabla_ABR, index = c("Shannon", "Chao1", "Simpson")) %>% 
+  rename(shannon_ABR= "diversity_shannon", chao_ABR = 'chao1', dominance.simpson_ABR = 'dominance_simpson', evenness.simpson_ABR = 'evenness_simpson' ) %>% 
+  rownames_to_column(.,var="label")  %>%  left_join(diver_gral,., by="label")
+
+diver_gral <- alpha(Tabla_BAC, index = c("Shannon", "Chao1", "Simpson")) %>% 
+  rename(shannon_BAC= "diversity_shannon", chao_BAC = 'chao1', dominance.simpson_BAC = 'dominance_simpson', evenness.simpson_BAC = 'evenness_simpson' ) %>% 
+  rownames_to_column(.,var="label")  %>%  left_join(diver_gral,., by="label")
+
+
+diver_gral <- alpha(Tabla_BAC_Metal, index = c("Shannon", "Chao1", "Simpson")) %>% 
+  rename(shannon_BACMetal= "diversity_shannon", chao_BACMetal = 'chao1', dominance.simpson_BACMetal = 'dominance_simpson', evenness.simpson_BACMetal = 'evenness_simpson' ) %>% 
+  rownames_to_column(.,var="label")  %>%  left_join(diver_gral,., by="label")
+
+diver_gral <- alpha(Tabla_BAC_Biocide, index = c("Shannon", "Chao1", "Simpson")) %>% 
+  rename(shannon_BACBiocide= "diversity_shannon", chao_BACBiocide = 'chao1', dominance.simpson_BACBiocide = 'dominance_simpson', evenness.simpson_BACBiocide = 'evenness_simpson' ) %>% rownames_to_column(.,var="label")  %>%  left_join(diver_gral,., by="label")
+
+tmp_treat_notreat <- Tabla_inicial %>% select(label, origin) %>% distinct()
+diver_gral <- left_join(diver_gral, tmp_treat_notreat)
+
+```
+
+## Shapiro test
+
+```{r}
+
+diver_gral <- diver_gral %>%
+  pivot_longer(cols=chao_gral:dominance.simpson_BACBiocide, names_to = "cosa", values_to = "value") %>% 
+  separate(cosa, into=c("index", "database2"), sep="_")
+
+shapiro <- diver_gral %>%
+  group_by(database2, index, origin) %>%
+  do(tidy(shapiro.test(.$value)))
+datatable(shapiro, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+```
+
+## Wilcox Test
+
+```{r}
+
+wilcox <- diver_gral %>% 
+  group_by(database2, index) %>% 
+  do(tidy(wilcox.test(.$value~.$origin)))
+datatable(wilcox, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+
+student <- diver_gral %>%
+  group_by(database2, index) %>%
+  do(tidy(t.test(.$value~.$origin)))
+datatable(student, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+## Shannon Index
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+diver_gral %>% filter(index== "shannon") %>% 
+  ggplot(aes(x=origin, y = value,fill=origin)) +
+  geom_violin()+
+  geom_boxplot(width=.2) +
+  facet_wrap(.~database2)+
+  ggtitle ("Shannon diversity") +xlab("Cohort origin") +ylab("Shannon Index")+
+  ylim(0,5)+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+diver_gral %>% filter(index== "shannon") %>% filter(database2== "ABR" | database2== "BACMetal"| database2== "BACBiocide") %>% 
+  ggplot(aes(x=origin, y = value,fill=origin)) +
+  geom_violin()+
+  geom_boxplot(width=.2) +
+  facet_wrap(.~database2)+
+  ggtitle ("Shannon diversity") +xlab("Cohort origin") +ylab("Shannon Index")+
+  ylim(0,5)+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+diver_gral %>%  filter(index == "shannon") %>% group_by(origin, database2)%>% summarise(media = mean(value)) %>% 
+  datatable(rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+grouped_ggbetweenstats(
+  data  = diver_gral %>% filter(index== "shannon") %>% filter(database2 != "gral") %>% filter(database2 != "BAC"),
+  x     = origin,
+  y     = value,
+  type = "np", 
+  grouping.var = database2,
+  theme = ggplot2::theme_classic(),
+  theme = ggplot2::theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1)))
+
+azaz <- grouped_ggbetweenstats(
+  data  = diver_gral %>% filter(index== "shannon") %>% filter(database2 != "gral")%>% filter(database2 != "BAC"),
+  x     = origin,
+  y     = value,
+  type = "np", 
+  grouping.var = database2)
+
+
+```
+
+## Chao index
+
+```{r}
+diver_gral %>% filter(index== "chao") %>% filter(database2== "ABR" | database2== "BACMetal"| database2== "BACBiocide") %>% 
+  ggplot(aes(x=origin, y = value,fill=origin)) +
+  geom_violin()+
+  geom_boxplot(width=.2) +
+  facet_wrap(.~database2)+
+  ggtitle ("chao index") +xlab("Cohort origin") +ylab("chao Index")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+diver_gral %>% filter(index== "chao") %>% filter(database2== "ABR" | database2== "BACMetal"| database2== "BACBiocide") %>% 
+  ggplot(aes(x=origin, y = value,fill=origin)) +
+  geom_violin()+
+  geom_boxplot(width=.2) +
+  facet_wrap(.~database2)+
+  ggtitle ("chao index") +xlab("Cohort origin") +ylab("chao Index")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+diver_gral %>%  filter(index == "chao") %>% group_by(origin, database2)%>% summarise(media = mean(value)) %>% 
+  datatable(rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+grouped_ggbetweenstats(
+  data  = diver_gral %>% filter(index== "chao"),
+  x     = origin,
+  y     = value,
+  grouping.var = database2)
+```
+
+## Dominance simpson
+
+```{r}
+
+diver_gral %>% filter(index== "dominance.simpson") %>% filter(database2== "ABR" | database2== "BACMetal"| database2== "BACBiocide") %>% 
+  ggplot(aes(x=origin, y = value,fill=origin)) +
+  geom_violin()+
+  geom_boxplot(width=.2) +
+  facet_wrap(.~database2)+
+  ggtitle ("dominance simpson diversity") +xlab("Cohort origin") +ylab("simpson Index")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+diver_gral %>%  filter(index == "dominance.simpson") %>% group_by(origin, database2)%>% summarise(media = mean(value)) %>% 
+  datatable(rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+
+grouped_ggbetweenstats(
+  data  = diver_gral %>% filter(index== "dominance.simpson"),
+  x     = origin,
+  y     = value,
+  grouping.var = database2)
+
+```
+
+## Eveness simpson
+
+```{r}
+diver_gral %>% filter(index== "evenness.simpson") %>% filter(database2== "ABR" | database2== "BACMetal"| database2== "BACBiocide") %>% 
+  ggplot(aes(x=origin, y = value,fill=origin)) +
+  geom_violin()+
+  geom_boxplot(width=.2) +
+  facet_wrap(.~database2)+
+  ggtitle ("eveness simpson diversity") +xlab("Cohort origin") +ylab("simpson Index")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+diver_gral %>%  filter(index == "evenness.simpson") %>% group_by(origin, database2)%>% summarise(media = mean(value)) %>% 
+  datatable(rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+grouped_ggbetweenstats(
+  data  = diver_gral %>% filter(index== "evenness.simpson"),
+  x     = origin,
+  y     = value,
+  grouping.var = database2)
+```
+
+# PCA {.tabset .tabset-fade .tabset-pills}
+
+```{r PCA spread,echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+Guayana_spread<- Tabla_inicial  %>%  select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)%>% column_to_rownames(var = "label")
+
+Guayana_spread_BAC<- Tabla_inicial %>% filter(database=="BAC") %>% select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+Guayana_spread_ABR<- Tabla_inicial %>% filter(database=="ABR") %>% select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+Guayana_spread_BAC_Metal <- Tabla_inicial %>% filter(database == 'BAC') %>% left_join(.,Tabla_metal_biocide, by = 'template')  %>% filter(database_BAC == "BAC_Metal")  %>%  group_by(template, label, origin,database) %>% summarise(depth = max(depth))%>% ungroup() %>%   select(template,depth,label) %>% group_by(template,label)%>% summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)%>% column_to_rownames(var = "label")
+
+Guayana_spread_BAC_Biocide <-  Tabla_inicial %>% filter(database == 'BAC') %>% left_join(.,Tabla_metal_biocide, by = 'template') %>%  filter(database_BAC == "BAC_Biocide") %>% group_by(template, label, origin,database) %>% summarise(depth = max(depth))%>% ungroup() %>%   select(template,depth,label) %>% group_by(template,label)%>% summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)%>% column_to_rownames(var = "label")
+
+
+Guayana_tsne_spearman = get_dist(Guayana_spread, method = "spearman")
+Guayana_tsne_spearman_BAC = get_dist(Guayana_spread_BAC, method = "spearman")
+Guayana_tsne_spearman_ABR = get_dist(Guayana_spread_ABR, method = "spearman")
+Guayana_tsne_spearman_BAC_Metal = get_dist(Guayana_spread_BAC_Metal, method = "spearman")
+Guayana_tsne_spearman_BAC_Biocide = get_dist(Guayana_spread_BAC_Biocide, method = "spearman")
+
+
+PCA <- prcomp(Guayana_spread)
+PCA_BAC <- prcomp(Guayana_spread_BAC)
+PCA_ABR <- prcomp(Guayana_spread_ABR)
+PCA_BAC_Metal <- prcomp(Guayana_spread_BAC_Metal)
+PCA_BAC_Biocide <- prcomp(Guayana_spread_BAC_Biocide)
+
+
+```
+
+## PCA gral by Origin
+
+```{r, message=FALSE}
+
+as.data.frame(PCA$x[,1:2]) %>% rownames_to_column("label") %>% inner_join(Tabla_inicial) %>%
+  select(label,PC1,PC2,origin) %>% distinct() %>% ggplot(aes(x = PC1, y = PC2, color = origin)) + geom_point() +
+  ggtitle ("Principal Component Analysis") +xlab("PC1 34.1%") +ylab("PC2 12.32%")
+```
+
+## PCA ABR by origin
+
+```{r PCA ABR Treatment, message=FALSE}
+
+as.data.frame(PCA_ABR$x[,1:2]) %>% rownames_to_column("label") %>% inner_join(Tabla_inicial) %>%
+  select(label,PC1,PC2,origin) %>% distinct() %>% ggplot(aes(x = PC1, y = PC2, color = origin)) + geom_point() +
+  ggtitle ("Principal Component Analysis") +xlab("PC1 42.56%") +ylab("PC2 11.15%")
+
+```
+
+## PCA BAC by origin
+
+```{r PCA BAC Treatment, message=FALSE}
+
+as.data.frame(PCA_BAC$x[,1:2]) %>% rownames_to_column("label") %>% inner_join(Tabla_inicial) %>%
+  select(label,PC1,PC2,origin) %>% distinct() %>% ggplot(aes(x = PC1, y = PC2, color = origin)) + geom_point() +
+  ggtitle ("Principal Component Analysis") +xlab("PC1 26.66%") +ylab("PC2 11.1%")
+
+```
+
+
+## PCA BAC Biocide by origin
+
+```{r PCA REL Treatment2, message=FALSE}
+
+as.data.frame(PCA_BAC_Biocide$x[,1:2]) %>% rownames_to_column("label") %>% inner_join(Tabla_inicial) %>%
+  select(label,PC1,PC2,origin) %>% distinct() %>% ggplot(aes(x = PC1, y = PC2, color = origin)) + geom_point() +
+  ggtitle ("Principal Component Analysis") +xlab("PC1 38.39%") +ylab("PC2 9%")
+
+```
+
+# UMAP {.tabset .tabset-fade .tabset-pills}
+
+```{r load UMAP, message=FALSE}
+Guayana_tsne_spearman <- as.matrix(Guayana_spread)
+Guayana_tsne_spearman_ABR <- as.matrix(Guayana_tsne_spearman_ABR)
+Guayana_tsne_spearman_BAC <- as.matrix(Guayana_tsne_spearman_BAC)
+Guayana_tsne_spearman_BAC_Metal = get_dist(Guayana_spread_BAC_Metal, method = "spearman")
+Guayana_tsne_spearman_BAC_Biocide = get_dist(Guayana_spread_BAC_Biocide, method = "spearman")
+
+
+umap_plot <- umap(Guayana_tsne_spearman, input="dist")
+umap_plot_ABR <- umap(Guayana_tsne_spearman_ABR, input="dist")
+umap_plot_BAC <- umap(Guayana_tsne_spearman_BAC, input="dist")
+umap_plot_BAC_Metal <- umap(Guayana_spread_BAC_Metal, input="dist")
+umap_plot_BAC_Biocide <- umap(Guayana_spread_BAC_Biocide, input="dist")
+
+umap_plot <- as.data.frame(umap_plot$layout) %>% rownames_to_column("label") %>% inner_join(., Tabla_inicial)
+umap_plot_ABR <- as.data.frame(umap_plot_ABR$layout) %>% rownames_to_column("label") %>% inner_join(., Tabla_inicial)
+umap_plot_BAC <- as.data.frame(umap_plot_BAC$layout) %>% rownames_to_column("label") %>% inner_join(., Tabla_inicial)
+umap_plot_BAC_Metal <- as.data.frame(umap_plot_BAC_Metal$layout) %>% rownames_to_column("label") %>% inner_join(., Tabla_inicial)
+umap_plot_BAC_Biocide <- as.data.frame(umap_plot_BAC_Biocide$layout) %>% rownames_to_column("label") %>% inner_join(., Tabla_inicial)
+
+```
+
+## UMAP general by origin
+
+```{r UMAP Treatment,echo=FALSE,warning=FALSE,message=FALSE}
+
+umap_plot %>%
+  select(label,V1,V2,origin) %>% distinct() %>% ggplot(aes(x = V1, y =V2, color = origin)) + geom_point()+
+  ggtitle ("UMAP General")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 0,  hjust=1))
+```
+
+## UMAP ABR by origin
+
+```{r UMAP ABR Treatment, message=FALSE}
+
+umap_plot_ABR %>%
+  select(label,V1,V2,origin) %>% distinct() %>% ggplot(aes(x = V1, y =V2, color = origin)) + geom_point()+
+  ggtitle ("UMAP ABR")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 0,  hjust=1))
+```
+
+## UMAP BAC by origin
+
+```{r UMAP BAC Treatment eur vs guay, message=FALSE}
+
+umap_plot_BAC %>%
+  select(label,V1,V2,origin) %>% distinct() %>% ggplot(aes(x = V1, y =V2, color = origin)) + geom_point()+
+  ggtitle ("UMAP BAC")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+```
+
+
+## UMAP BAC Metal by origin
+
+```{r UMAP REL origin eur vs guay2, message=FALSE}
+
+umap_plot_BAC_Metal %>%
+  select(label,V1,V2,origin) %>% distinct() %>% ggplot(aes(x = V1, y =V2, color = origin)) + geom_point()+
+  ggtitle ("UMAP BAC Metal")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+```
+
+## UMAP BAC Biocide by origin
+
+```{r UMAP REL origin eur vs guay, message=FALSE}
+
+umap_plot_BAC_Biocide %>%
+  select(label,V1,V2,origin) %>% distinct() %>% ggplot(aes(x = V1, y =V2, color = origin)) + geom_point()+
+  ggtitle ("UMAP BAC biocide")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+```
+
+# T-SNE {.tabset .tabset-fade .tabset-pills}
+
+```{r T-SNE, echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+Guayana_tsne_spearman = get_dist(Guayana_spread, method = "spearman")
+Guayana_tsne_spearman_BAC = get_dist(Guayana_spread_BAC, method = "spearman")
+Guayana_tsne_spearman_ABR = get_dist(Guayana_spread_ABR, method = "spearman")
+Guayana_tsne_spearman_BAC_Metal = get_dist(Guayana_spread_BAC_Metal, method = "spearman")
+Guayana_tsne_spearman_BAC_Biocide = get_dist(Guayana_spread_BAC_Biocide, method = "spearman")
+
+
+
+tsne_spearman_30 <- Rtsne(as.matrix(Guayana_tsne_spearman), dims = 2, perplexity=40, verbose=TRUE, max_iter = 10000, is_distance = TRUE) 
+tsne_spearman_30_BAC <- Rtsne(as.matrix(Guayana_tsne_spearman_BAC), dims = 2, perplexity=40, verbose=TRUE, max_iter = 10000, is_distance = TRUE) 
+tsne_spearman_30_ABR <- Rtsne(as.matrix(Guayana_tsne_spearman_ABR), dims = 2, perplexity=40, verbose=TRUE, max_iter = 10000, is_distance = TRUE) 
+tsne_spearman_30_BAC_Metal <- Rtsne(as.matrix(Guayana_tsne_spearman_BAC_Metal), dims = 2, perplexity=40, verbose=TRUE, max_iter = 10000, is_distance = TRUE) 
+tsne_spearman_30_BAC_Biocide <- Rtsne(as.matrix(Guayana_tsne_spearman_BAC_Biocide), dims = 2, perplexity=40, verbose=TRUE, max_iter = 10000, is_distance = TRUE) 
+
+
+Guayana_ABR<- Tabla_inicial %>% filter(database=="ABR")
+Guayana_BAC<- Tabla_inicial %>% filter(database=="BAC")
+Guayana_BAC_Metal<- Tabla_inicial_info %>% filter(database_BAC=="BAC_Metal")
+Guayana_BAC_Biocide<- Tabla_inicial_info %>% filter(database_BAC=="BAC_Biocide")
+
+Guayana_spread_label<- Tabla_inicial %>% select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)
+Guayana_spread_label_ABR<- Guayana_ABR %>% select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)
+Guayana_spread_label_BAC<- Guayana_BAC %>% select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)
+Guayana_spread_label_BAC_Metal<- Guayana_BAC_Metal %>% select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)
+Guayana_spread_label_BAC_Biocide<- Guayana_BAC_Biocide %>% select(template,depth,label) %>% group_by(template,label) %>% 
+  summarise(depth = max(depth)) %>% distinct(template, label, .keep_all = T) %>%  spread(template,depth, fill = 0)
+
+tsne_spearman_30_plot <- data.frame(x= tsne_spearman_30$Y[,1], y = tsne_spearman_30$Y[,2], label = Guayana_spread_label$label) %>% 
+   left_join(Tabla_inicial)
+tsne_spearman_30_plot_BAC <- data.frame(x= tsne_spearman_30_BAC$Y[,1], y = tsne_spearman_30_BAC$Y[,2], label = Guayana_spread_label_BAC$label) %>% left_join(Guayana_BAC)
+tsne_spearman_30_plot_ABR <- data.frame(x= tsne_spearman_30_ABR$Y[,1], y = tsne_spearman_30_ABR$Y[,2], label = Guayana_spread_label_ABR$label) %>% left_join(Guayana_ABR)
+tsne_spearman_30_plot_BAC_Metal <- data.frame(x= tsne_spearman_30_BAC_Metal$Y[,1], y = tsne_spearman_30_BAC_Metal$Y[,2], label = Guayana_spread_label_BAC_Metal$label) %>% left_join(Guayana_BAC_Metal)
+tsne_spearman_30_plot_BAC_Biocide <- data.frame(x= tsne_spearman_30_BAC_Biocide$Y[,1], y = tsne_spearman_30_BAC_Biocide$Y[,2], label = Guayana_spread_label_BAC_Biocide$label) %>% left_join(Guayana_BAC_Biocide)
+
+```
+
+## T-SNE general by origin
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(tsne_spearman_30_plot) + geom_point(aes(x=x,y=y,color=origin)) + ggtitle("T-SNE")
+
+```
+
+## T-SNE ABR by origin
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(tsne_spearman_30_plot_ABR) + geom_point(aes(x=x,y=y,color=origin)) + ggtitle("T-SNE ABR")
+
+```
+
+## T-SNE BAC by origin
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(tsne_spearman_30_plot_BAC) + geom_point(aes(x=x,y=y,color=origin)) + ggtitle("T-SNE BAC")
+
+```
+
+
+## T-SNE Metal by origin
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(tsne_spearman_30_plot_BAC_Metal) + geom_point(aes(x=x,y=y,color=origin)) + ggtitle("T-SNE metal")
+
+```
+
+## T-SNE biocide by origin
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(tsne_spearman_30_plot_BAC_Biocide) + geom_point(aes(x=x,y=y,color=origin)) + ggtitle("T-SNE biocide")
+
+```
+
+# Adonis {.tabset .tabset-fade .tabset-pills}
+
+## Adonis all
+
+```{r adonis all,echo=FALSE,warning=FALSE,message=FALSE}
+
+Tabla_inicial_all <- Tabla_inicial %>% select(label, origin) %>% distinct()
+Guayana_spread_t <- rownames_to_column(Guayana_spread, var = 'label') 
+Guayana_spread_t <- left_join(Guayana_spread_t, Tabla_inicial_all)
+Guayana_spread_t <- column_to_rownames(Guayana_spread_t,  var = 'label')
+adonis2(Guayana_spread_t[,1:13895]~origin, data = Guayana_spread_t ,perm=999)
+
+```
+
+## Adonis ABR
+
+```{r adonis ABR,echo=FALSE,warning=FALSE,message=FALSE}
+
+Tabla_inicial_ABR <- Tabla_inicial %>%filter (database=="ABR") %>% select(label, origin) %>% distinct()
+
+Guayana_spread_ABR_t <- rownames_to_column(Guayana_spread_ABR, var = 'label') 
+Guayana_spread_ABR_t <- left_join(Guayana_spread_ABR_t, Tabla_inicial_ABR)
+Guayana_spread_ABR_t <- column_to_rownames(Guayana_spread_ABR_t,  var = 'label')
+
+adonis2(Guayana_spread_ABR_t[,1:367]~origin, data = Guayana_spread_ABR_t ,perm=999)
+
+```
+
+## Adonis BAC
+
+```{r adonis BAC,echo=FALSE,warning=FALSE,message=FALSE}
+
+Tabla_inicial_BAC <- Tabla_inicial %>%filter (database=="BAC") %>% select(label, origin) %>% distinct()
+
+Guayana_spread_BAC_t <- rownames_to_column(Guayana_spread_BAC, var = 'label') 
+Guayana_spread_BAC_t <- left_join(Guayana_spread_BAC_t, Tabla_inicial_BAC)
+Guayana_spread_BAC_t <- column_to_rownames(Guayana_spread_BAC_t,  var = 'label')
+
+adonis2(Guayana_spread_BAC_t[,1:13528]~origin, data = Guayana_spread_BAC_t ,perm=999)
+
+```
+
+
+## Adonis BAC metal
+
+```{r adonis REL1,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+Tabla_inicial_BAC_Metal <-   Tabla_inicial %>% filter(database == 'BAC') %>% left_join(.,Tabla_metal_biocide, by = 'template')  %>% filter(database_BAC == "BAC_Metal")  %>%  group_by(template, label, origin,database) %>% summarise(depth = max(depth))%>% ungroup() %>%  select(label, origin) %>% distinct()
+
+Guayana_spread_BAC_Metal_t <- rownames_to_column(Guayana_spread_BAC_Metal, var = 'label') 
+Guayana_spread_BAC_Metal_t <- left_join(Guayana_spread_BAC_Metal_t, Tabla_inicial_BAC_Metal)
+Guayana_spread_BAC_Metal_t <- column_to_rownames(Guayana_spread_BAC_Metal_t,  var = 'label')
+
+adonis2(Guayana_spread_BAC_Metal_t[,1:8360]~origin, data = Guayana_spread_BAC_Metal_t ,perm=999)
+
+```
+
+## Adonis BAC biocide
+
+```{r adonis REL2,echo=FALSE,warning=FALSE,message=FALSE}
+
+Tabla_inicial_BAC_biocide <-   Tabla_inicial %>% filter(database == 'BAC') %>% left_join(.,Tabla_metal_biocide, by = 'template')  %>% filter(database_BAC == "BAC_Biocide")  %>%  group_by(template, label, origin,database) %>% summarise(depth = max(depth))%>% ungroup() %>%  select(label, origin) %>% distinct()
+
+Guayana_spread_BAC_Biocide_t <- rownames_to_column(Guayana_spread_BAC_Biocide, var = 'label') 
+Guayana_spread_BAC_Biocide_t <- left_join(Guayana_spread_BAC_Biocide_t, Tabla_inicial_BAC_biocide)
+Guayana_spread_BAC_Biocide_t <- column_to_rownames(Guayana_spread_BAC_Biocide_t,  var = 'label')
+
+adonis2(Guayana_spread_BAC_Biocide_t[,1:6625]~origin, data = Guayana_spread_BAC_Biocide_t ,perm=999)
+
+```
+
+# Different genes stats {.tabset .tabset-fade .tabset-pills}
+
+## Quantity of distinct genes by origin
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+Tabla_inicial  %>%   group_by(database,origin, template) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% 
+  group_by(origin,database) %>% summarise(Different_genes_all_1 = n()) %>%
+  ggplot(aes(x=origin,y=Different_genes_all_1,fill=database)) + geom_col()+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+
+
+Tabla_inicial  %>% 
+  group_by(database,label, origin) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% 
+  group_by(database) %>% 
+  do(tidy(wilcox.test(.$Different_genes_all~.$origin)))
+
+plotp <- Tabla_inicial  %>%  group_by(database,origin, template) %>% summarise(Different_genes_all = n()) %>% ungroup() %>%  mutate(percent = (ifelse(origin == "europa", Different_genes_all/29*100, Different_genes_all/95*100)))
+
+grouped_ggbetweenstats(
+  data  = plotp,
+  x     = origin,
+  y     = percent,
+  grouping.var = database,
+  type = "np",
+  ggplot.component = ggplot2::scale_y_continuous(limits = (c(0, 100)))
+  )
+
+Tabla_inicial   %>%  group_by(database,origin, template) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% 
+  group_by(origin,database) %>% summarise(Different_genes_all_1 = n()) %>% 
+  ggplot(aes(x = database, y = Different_genes_all_1, fill = origin))+geom_col(position = "dodge")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+```
+
+## Mean of distinct genes by origin per person
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_inicial  %>%  group_by(database,origin, label) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% 
+  group_by(origin,database) %>% summarise(Different_genes_all_1 = mean(Different_genes_all)) %>%
+  ggplot(aes(x=origin,y=Different_genes_all_1,fill=database)) + geom_col()+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank() )
+Tabla_inicial  %>%filter(origin == "guayana") %>%  group_by(label) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% summarise(media = mean(Different_genes_all)) 
+Tabla_inicial %>%filter(origin == "europa") %>%  group_by(label) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% summarise(media = mean(Different_genes_all)) 
+
+
+plotp1 <- Tabla_inicial  %>%  group_by(database,origin, label) %>% summarise(Different_genes_all = n()) %>% ungroup()
+
+grouped_ggbetweenstats(
+  data  =plotp1 ,
+  x     = origin,
+  y     = Different_genes_all,
+  grouping.var = database,
+  type = "np",
+  ggplot.component = ggplot2::scale_y_continuous(limits = (c(1, 817))))
+
+```
+
+## Proportion unique genes
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_inicial  %>%  group_by(database,origin, template) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% 
+  group_by(origin,database) %>% summarise(Different_genes_all_1 = n()) %>%
+  ggplot(aes(x=origin,y=Different_genes_all_1,fill=database)) +geom_col(position = "fill")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank() )
+
+zz <- Tabla_inicial %>% 
+  group_by(database,label, origin) %>% summarise(Different_genes_all = n()) %>% ungroup() %>% 
+  group_by(database) %>% 
+  do(tidy(wilcox.test(.$Different_genes_all~.$origin)))
+datatable(zz, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+Tabla_inicial %>%filter(origin == "guayana") %>%  group_by(database) %>% summarise(Different_genes_all = n()) %>% ungroup() 
+Tabla_inicial  %>%filter(origin == "europa") %>%  group_by(database) %>% summarise(Different_genes_all = n()) %>% ungroup()
+
+
+```
+
+## Proportion unique genes per person
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE,  fig.height=5, fig.width=12}
+Tabla_inicial  %>%  group_by(origin, database, label) %>% summarise(Different_genes_all = n()) %>% ggplot(aes(x=label,y=Different_genes_all,fill=database)) + geom_col(position = "fill")+ 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(),
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank() )
+
+```
+
+## Total unique genes per person
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE,  fig.height=5, fig.width=12}
+
+Tabla_inicial1 <- Tabla_inicial  %>%  group_by(label,origin,database, template) %>% summarise(Different_genes_all = n()) %>% ungroup()
+
+Tabla_inicial1$Different_genes_all <- as.numeric(Tabla_inicial1$Different_genes_all )
+Tabla_inicial1$label <- reorder(Tabla_inicial1$label, Tabla_inicial1$Different_genes_all)
+
+Tabla_inicial2 <- Tabla_inicial1 %>% group_by(label,database) %>%  mutate(TotalFreq = n())
+
+Tabla_inicial2 %>%
+  ggplot(aes(x=stats::reorder(label, TotalFreq),y=Different_genes_all,fill=database)) + geom_col()+ 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(),
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+```
+
+## genes per million
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE,  fig.height=5, fig.width=12}
+
+
+tabla_bow_together <- t(as.data.frame(rbind(tabla_bowtie$X1, tabla_lines$X1)))
+tabla_bow_together <- as.data.frame(tabla_bow_together)
+tabla_bow_together <- tabla_bow_together%>% separate(V2,c("dataset", "kk"), sep = "\\.") %>%select(-kk)
+tabla_bow_together <- left_join(tabla_bow_together, tabla_label, by = 'dataset')
+tabla_bow_together <- tabla_bow_together %>% select(V1, label)
+
+Tabla_distinct <- Tabla_inicial %>%  group_by(label) %>% mutate(Different_genes_all = n()) %>% ungroup()
+Tabla_distinct <- Tabla_inicial %>% filter(database == "ABR") %>%  group_by(label) %>% summarise(Different_genes_ABR = n()) %>% left_join(Tabla_distinct,., by ='label') %>% ungroup()
+Tabla_distinct <- Tabla_inicial %>% filter(database == "BAC") %>%  group_by(label) %>% summarise(Different_genes_BAC = n()) %>% left_join(Tabla_distinct,., by ='label') %>%  ungroup()
+Tabla_distinct <- left_join(Tabla_distinct, tabla_bow_together, by = 'label')
+Tabla_distinct$V1 <- as.numeric(Tabla_distinct$V1 )
+
+Tabla_distinct <-  mutate(Tabla_distinct, genes_million = Different_genes_all / V1) %>% select(label, origin, genes_million) %>% distinct()
+Tabla_distinct$genes_million <- as.numeric(Tabla_distinct$genes_million )
+
+Tabla_distinct$label <- reorder(Tabla_distinct$label, Tabla_distinct$genes_million)
+
+Tabla_distinct  %>% ggplot() + geom_col(aes(stats::reorder(label, genes_million),genes_million,fill=origin))+ 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(),
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+```
+
+## Rarefaction
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+
+label_exp_guayana <- Tabla_inicial %>% filter(origin == 'guayana') %>%  distinct(label) 
+label_exp_guayana <- as.vector(t(label_exp_guayana))
+label_exp_guayana <- sample(label_exp_guayana)
+
+label_exp_europa <- Tabla_inicial  %>% filter(origin == 'europa') %>%  distinct(label) 
+label_exp_europa <- as.vector(t(label_exp_europa))
+label_exp_europa <- sample(label_exp_europa)
+
+label_exp <- Tabla_inicial %>%  distinct(label) 
+label_exp <- as.vector(t(label_exp))
+label_exp <- sample(label_exp)
+
+
+nums_guayana <- c()
+for (i in 1:95){
+  a <- label_exp_guayana[1:i]
+  num <- Tabla_inicial %>% filter(grepl(paste(a, collapse="|"), label)) %>%select(template) %>% distinct() %>% nrow()
+  nums_guayana <- c(nums_guayana, num)
+}
+
+
+jj <- data_frame(nums_guayana)
+jj$observation <- 1:nrow(jj) 
+colnames(jj) <- c('nums','observation')
+
+
+ggplot()+
+  geom_line(data=jj,aes(observation,nums,color="green"))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+```
+
+## Rarefaction ABR
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+
+label_exp_guayana <- Tabla_inicial %>% filter(origin == 'guayana') %>% filter(database == 'ABR') %>%  distinct(label) 
+label_exp_guayana <- as.vector(t(label_exp_guayana))
+label_exp_guayana <- sample(label_exp_guayana)
+
+label_exp_europa <- Tabla_inicial %>% filter(origin == 'europa')%>% filter(database == 'ABR')  %>%  distinct(label) 
+label_exp_europa <- as.vector(t(label_exp_europa))
+label_exp_europa <- sample(label_exp_europa)
+
+label_exp <- Tabla_inicial %>%  distinct(label) 
+label_exp <- as.vector(t(label_exp))
+label_exp <- sample(label_exp)
+
+
+nums_guayana <- c()
+for (i in 1:95){
+  a <- label_exp_guayana[1:i]
+  num <- Tabla_inicial %>% filter(grepl(paste(a, collapse="|"), label)) %>%select(template) %>% distinct() %>% nrow()
+  nums_guayana <- c(nums_guayana, num)
+}
+
+
+jj <- data_frame(nums_guayana)
+jj$observation <- 1:nrow(jj) 
+colnames(jj) <- c('nums','observation')
+
+ggplot()+
+  geom_line(data=jj,aes(observation,nums,color="green"))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+```
+
+## Rarefaction BAC
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+
+label_exp_guayana <- Tabla_inicial %>% filter(origin == 'guayana') %>% filter(database == 'BAC') %>%  distinct(label) 
+label_exp_guayana <- as.vector(t(label_exp_guayana))
+label_exp_guayana <- sample(label_exp_guayana)
+
+label_exp_europa <- Tabla_inicial %>% filter(origin == 'europa')%>% filter(database == 'BAC')  %>%  distinct(label) 
+label_exp_europa <- as.vector(t(label_exp_europa))
+label_exp_europa <- sample(label_exp_europa)
+
+label_exp <- Tabla_inicial %>%  distinct(label) 
+label_exp <- as.vector(t(label_exp))
+label_exp <- sample(label_exp)
+
+
+nums_guayana <- c()
+for (i in 1:95){
+  a <- label_exp_guayana[1:i]
+  num <- Tabla_inicial %>% filter(grepl(paste(a, collapse="|"), label)) %>%select(template) %>% distinct() %>% nrow()
+  nums_guayana <- c(nums_guayana, num)
+}
+
+
+jj <- data_frame(nums_guayana)
+jj$observation <- 1:nrow(jj) 
+colnames(jj) <- c('nums','observation')
+
+ggplot()+
+  geom_line(data=jj,aes(observation,nums,color="green"))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+```
+
+## Abundance vs Depth
+
+```{r, echo=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_abundancias <- Tabla_inicial %>% group_by(template) %>% summarise(sum_depth = sum(depth), count_abun = n())
+
+Tabla_abundancias1 <- Tabla_inicial %>% group_by(template) %>% summarise(mean_depth = mean(depth), count_abun = n())
+Tabla_abundancias2 <- Tabla_inicial %>% group_by(label) %>% summarise(sum_depth = sum(depth), count_abun = n())
+Tabla_abundancias3 <- Tabla_inicial_prev %>% group_by(label) %>% summarise(sum_depth = sum(depth), count_abun = n())
+
+
+ggplot(Tabla_abundancias2, aes(x=sum_depth, y=count_abun)) + 
+  geom_point()+
+  geom_smooth(method=lm, se=FALSE)+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1,strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+ggplot(Tabla_abundancias, aes(x=log10(sum_depth), y=count_abun)) + 
+  geom_point()+
+  geom_smooth(method=lm, se=FALSE)+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+ggplot(Tabla_abundancias, aes(y=log10(sum_depth), x=count_abun)) + 
+  geom_point()+
+  geom_smooth(method=lm, se=FALSE)+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+ggplot(Tabla_abundancias1, aes(x=log10(mean_depth), y=count_abun)) + 
+  geom_point()+
+  geom_smooth(method=lm, se=FALSE)
+
+ggplot(Tabla_abundancias1, aes(y=log10(mean_depth), x=count_abun)) + 
+  geom_point()+
+  geom_smooth(method=lm, se=FALSE)+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 0,  hjust=1), axis.title.x = element_blank(), axis.title.y =  element_blank())
+
+
+
+```
+
+# Tables of Genes {.tabset .tabset-fade .tabset-pills}
+
+## Common genes ABR
+
+```{r table of common ABR,echo=FALSE,warning=FALSE,message=FALSE}
+
+union_guayana <- Tabla_inicial %>% filter(origin=="guayana") %>% filter(database =="ABR") %>%  select(template, label) %>% distinct()
+union_europa_t0 <- Tabla_inicial %>% filter(origin=="europa")  %>% filter(database =="ABR")  %>% select(template, label) %>% distinct()
+guayana_europa_t0_a <- inner_join(union_guayana, union_europa_t0, by = "template") %>% select(template, label.x) %>% distinct()
+colnames(guayana_europa_t0_a) <- c("template", "label")
+guayana_europa_t0_b <- inner_join(union_guayana, union_europa_t0, by = "template") %>% select(template, label.y) %>% distinct()
+colnames(guayana_europa_t0_b) <- c("template", "label")
+guayana_europa_t0_binded <- bind_rows(guayana_europa_t0_a, guayana_europa_t0_b)
+guayana_europa_t0_binded$Label <- "guiana" 
+guayana_europa_t0_binded$Label[grepl("^europe",guayana_europa_t0_binded$label)] = "europe" 
+guayana_europa_t0_binded$Label[grepl("^europe",guayana_europa_t0_binded$label)] = "europe" 
+
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'ABR') %>% select(template, Class) %>% distinct()
+tabla_para_teresa_ABR <- left_join(guayana_europa_t0_binded, Tabla_inicial_info_mini, by = 'template') %>% distinct()%>% group_by(template, Label, Class) %>% summarise(TotalFreq = n()) %>% ungroup()
+
+datatable(tabla_para_teresa_ABR, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+```
+
+## not in common genes ABR
+
+```{r not in common ABR, echo=FALSE,warning=FALSE,message=FALSE}
+anti_guayana <- anti_join(union_guayana, union_europa_t0, by = "template")
+anti_europe <- anti_join(union_europa_t0,union_guayana, by = "template")
+anti_binded <- bind_rows(anti_guayana, anti_europe)
+anti_binded$Label <- "guiana" 
+anti_binded$Label[grepl("^europe",anti_binded$label)] = "europe" 
+anti_binded$Label[grepl("^europe",anti_binded$label)] = "europe" 
+
+anti_tabla_para_teresa_ABR <- left_join(anti_binded, Tabla_inicial_info_mini, by = 'template') %>% distinct()%>% group_by(template, Label, Class) %>% summarise(TotalFreq = n()) %>% ungroup()
+
+
+datatable(anti_tabla_para_teresa_ABR, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+
+```
+
+## Common genes BAC
+
+```{r table of common BAC,echo=FALSE,warning=FALSE,message=FALSE}
+
+union_guayana_BAC <- Tabla_inicial_info %>% filter(origin=="guayana") %>% filter(database =="BAC") %>%  select(template_gene, label) %>% distinct()
+union_europa_t0_BAC <- Tabla_inicial_info %>% filter(origin=="europa")  %>% filter(database =="BAC")  %>% select(template_gene, label) %>% distinct()
+
+guayana_europa_t0_a_BAC <- inner_join(union_guayana_BAC, union_europa_t0_BAC, by = "template_gene") %>% select(template_gene, label.x) %>% distinct()
+colnames(guayana_europa_t0_a_BAC) <- c("template_gene", "label")
+guayana_europa_t0_b_BAC <- inner_join(union_guayana_BAC, union_europa_t0_BAC, by = "template_gene") %>% select(template_gene, label.y) %>% distinct()
+colnames(guayana_europa_t0_b_BAC) <- c("template_gene", "label")
+guayana_europa_t0_binded_BAC <- bind_rows(guayana_europa_t0_a_BAC, guayana_europa_t0_b_BAC)
+guayana_europa_t0_binded_BAC$Label <- "guiana" 
+guayana_europa_t0_binded_BAC$Label[grepl("^europe",guayana_europa_t0_binded_BAC$label)] = "europe" 
+guayana_europa_t0_binded_BAC$Label[grepl("^europe",guayana_europa_t0_binded_BAC$label)] = "europe" 
+
+Bac_met_db <-  bind_rows(Bac_met_pred)
+
+
+tabla_para_teresa_BAC <- guayana_europa_t0_binded_BAC %>%  distinct()%>% group_by(template_gene, Label) %>% summarise(TotalFreq = n()) %>% ungroup() %>% distinct()
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'BAC') %>% select(template, template_gene,Class_compound, Compound, Organism, NCBI_annotation, Gene_name) %>% distinct()
+
+tabla_para_teresa_BAC <- left_join(tabla_para_teresa_BAC, Tabla_inicial_info_mini, by = 'template_gene') 
+
+datatable(tabla_para_teresa_BAC, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) ) 
+
+
+```
+
+## not in common genes BAC
+
+```{r not in common BAC, echo=FALSE,warning=FALSE,message=FALSE}
+anti_guayana_BAC <- anti_join(union_guayana_BAC, union_europa_t0_BAC, by = "template_gene")
+anti_europe_BAC <- anti_join(union_europa_t0_BAC,union_guayana_BAC, by = "template_gene")
+anti_binded_BAC <- bind_rows(anti_guayana_BAC, anti_europe_BAC)
+anti_binded_BAC$Label <- "guiana" 
+anti_binded_BAC$Label[grepl("^europe",anti_binded_BAC$label)] = "europe" 
+anti_binded_BAC$Label[grepl("^europe",anti_binded_BAC$label)] = "europe" 
+
+
+anti_tabla_para_teresa_BAC <- anti_binded_BAC %>% group_by(template_gene, Label) %>% summarise(TotalFreq = n()) %>% ungroup() %>% distinct()
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'BAC') %>% select(template, template_gene,Class_compound, Compound, Organism, NCBI_annotation, Gene_name) %>% distinct()
+
+anti_tabla_para_teresa_BAC <- left_join(anti_tabla_para_teresa_BAC, Tabla_inicial_info_mini, by = 'template_gene') 
+
+
+datatable(anti_tabla_para_teresa_BAC, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+```
+
+## Common genes BAC metal
+
+```{r table of common BAC metal,echo=FALSE,warning=FALSE,message=FALSE}
+
+tabla_para_teresa_BAC_metal <- guayana_europa_t0_binded_BAC %>%  distinct()%>% group_by(template_gene, Label) %>% summarise(TotalFreq = n()) %>% ungroup() %>% distinct()
+
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'BAC') %>% select(template, template_gene,Class_compound, Compound, Organism, database_BAC, NCBI_annotation, Gene_name) %>% distinct()
+
+tabla_para_teresa_BAC_metal <- left_join(tabla_para_teresa_BAC_metal, Tabla_inicial_info_mini, by = 'template_gene') %>% filter(database_BAC == "BAC_Metal")
+
+datatable(tabla_para_teresa_BAC_metal, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+```
+
+## not in common genes BAC metal
+
+```{r not in common BAC metal, echo=FALSE,warning=FALSE,message=FALSE}
+
+anti_tabla_para_teresa_BAC_metal <- anti_binded_BAC %>% group_by(template_gene, Label) %>% summarise(TotalFreq = n()) %>% ungroup() %>% distinct()
+
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'BAC') %>% select(template, template_gene,Class_compound, Compound, Organism,database_BAC,NCBI_annotation, Gene_name) %>% distinct()
+
+anti_tabla_para_teresa_BAC_metal <- left_join(anti_tabla_para_teresa_BAC_metal, Tabla_inicial_info_mini, by = 'template_gene') %>% filter(database_BAC == "BAC_Metal")
+
+datatable(anti_tabla_para_teresa_BAC_metal, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+## Common genes BAC biocide
+
+```{r table of common BAC biocide,echo=FALSE,warning=FALSE,message=FALSE}
+
+tabla_para_teresa_BAC_biocide <- guayana_europa_t0_binded_BAC %>%  distinct()%>% group_by(template_gene, Label) %>% summarise(TotalFreq = n()) %>% ungroup() %>% distinct()
+
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'BAC') %>% select(template, template_gene,Class_compound, Compound, Organism, database_BAC, NCBI_annotation, Gene_name) %>% distinct()
+
+tabla_para_teresa_BAC_biocide <- left_join(tabla_para_teresa_BAC_biocide, Tabla_inicial_info_mini, by = 'template_gene') %>% filter(database_BAC == "BAC_Biocide")
+
+datatable(tabla_para_teresa_BAC_biocide, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+## not in common genes BAC biocide
+
+```{r not in common BAC biocide, echo=FALSE,warning=FALSE,message=FALSE}
+
+anti_tabla_para_teresa_BAC_biocide <- anti_binded_BAC %>% group_by(template_gene, Label) %>% summarise(TotalFreq = n()) %>% ungroup() %>% distinct()
+
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'BAC') %>% select(template, template_gene,Class_compound, Compound, Organism,database_BAC, NCBI_annotation, Gene_name) %>% distinct()
+
+anti_tabla_para_teresa_BAC_biocide <- left_join(anti_tabla_para_teresa_BAC_biocide, Tabla_inicial_info_mini, by = 'template_gene') %>% filter(database_BAC == "BAC_Biocide")
+
+datatable(anti_tabla_para_teresa_BAC_biocide, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+
+
+## Common genes all
+
+```{r table of all common,echo=FALSE,warning=FALSE,message=FALSE}
+
+all_common <- bind_rows(tabla_para_teresa_ABR, tabla_para_teresa_BAC) %>% select(-Organism)
+
+datatable(all_common, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+
+```
+
+## not in common genes
+
+```{r not in common all, echo=FALSE,warning=FALSE,message=FALSE}
+
+anti_tabla_para_teresa_BAC1 = rename(anti_tabla_para_teresa_BAC, Tipo =Compound)
+anti_tabla_para_teresa_ABR1 = rename(anti_tabla_para_teresa_ABR, Tipo =Class)
+all_not_common <- bind_rows(anti_tabla_para_teresa_ABR, anti_tabla_para_teresa_BAC)
+
+datatable(all_not_common, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+# Core genes {.tabset .tabset-fade .tabset-pills}
+
+## Core genes all
+
+```{r}
+tabla_core <- Tabla_inicial %>%  group_by(template) %>% summarise(TotalFreq = n())%>% ungroup() %>% filter(TotalFreq == 124)
+datatable(tabla_core, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+## Core genes europe
+
+```{r}
+tabla_core_eur <- Tabla_inicial %>% filter(origin=="europa") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup() %>% filter(TotalFreq == 29)
+datatable(tabla_core_eur, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+## Core genes guayana
+
+```{r}
+tabla_core_guayana <- Tabla_inicial  %>% filter(origin=="guayana") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup() %>% filter(TotalFreq == 95)
+datatable(tabla_core_guayana, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+# Gene diversity {.tabset .tabset-fade .tabset-pills}
+
+## gene diversity by person ABR
+
+```{r}
+gene_diver_ABR_pers <- Tabla_inicial %>%  filter(database == "ABR") %>% separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>%  group_by(origin, label, Gen) %>% 
+  summarise(n = n()) %>% ungroup() 
+datatable(gene_diver_ABR_pers, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+```
+
+## gene diversity by person BAC
+
+```{r}
+gene_diver_BAC_pers <-  Tabla_inicial %>%  filter(database == "BAC") %>% separate(template, c("ID","Gen"),sep = "_",remove = FALSE) %>%  group_by(origin, label, Gen) %>% 
+  summarise(n = n()) %>% ungroup() 
+datatable(gene_diver_BAC_pers, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+## gene diversity by Gene ABR 
+
+```{r}
+
+gene_diver_ABR_gene <- Tabla_inicial %>% filter(database == "ABR") %>% 
+  separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  separate(Gen, c("Gen","ID"),sep = "-",remove = FALSE) %>% 
+  group_by(origin,label, Gen) %>% 
+  summarise(n = n()) %>% ungroup()  %>%  group_by(origin,Gen) %>% 
+  summarise(personas = n()) %>% ungroup()
+
+gene_diver_ABR_gene1 <- Tabla_inicial %>% filter(database == "ABR") %>% 
+  separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  separate(Gen, c("Gen","ID"),sep = "-",remove = FALSE) %>% 
+  select(origin,template,Gen) %>% 
+  distinct() %>% group_by(origin,Gen) %>% summarise(alelos = n()) %>% ungroup() %>%
+  left_join(gene_diver_ABR_gene, by = c("Gen", "origin"))  %>%
+  mutate(personas_perc = (ifelse(origin == "europa", personas/29*100, personas/95*100)))
+
+
+datatable(gene_diver_ABR_gene1, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+```{r}
+Tabla_inicial_info_mini_abr_short <- Tabla_inicial_info %>% filter(database == "ABR") %>% 
+  separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>% 
+  separate(Gen, c("Gen","ID"),sep = "-",remove = FALSE) %>% select(Gen, Class) %>% distinct()
+gene_diver_ABR_gene1 %>% left_join(.,Tabla_inicial_info_mini_abr_short)%>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% 
+  filter(origin == "guayana") %>% 
+  ggplot(aes(x = alelos, y =personas_perc , color = Class)) + geom_point() +
+  theme_classic()+
+  scale_color_d3(palette = "category20")
+
+  
+```
+
+
+## gene diversity by Gene BAC 
+
+```{r}
+
+gene_diver_BAC_gene <- Tabla_inicial %>% filter(database == "BAC") %>% 
+  separate(template, c("ID","Gen"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  group_by(origin,label, Gen) %>% 
+  summarise(n = n()) %>% ungroup()  %>%  group_by(origin,Gen) %>% 
+  summarise(personas = n()) %>% ungroup()
+
+gene_diver_BAC_gene1 <- Tabla_inicial %>% filter(database == "BAC") %>% 
+  separate(template, c("ID","Gen"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  select(origin,template,Gen) %>% 
+  distinct() %>% group_by(origin,Gen) %>% summarise(alelos = n()) %>% ungroup() %>%
+  left_join(gene_diver_BAC_gene, by = c("Gen", "origin"))  %>%
+  mutate(personas_perc = (ifelse(origin == "europa", personas/29*100, personas/95*100)))
+
+
+datatable(gene_diver_BAC_gene1, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+
+```{r}
+
+Tabla_inicial_info_mini_bac_short <- Tabla_inicial_info %>% filter(database == 'BAC') %>% select(template, template_gene,Class_compound, Compound, Organism, NCBI_annotation, Gene_name) %>% distinct() %>% rename(Gen = Gene_name)
+
+gene_diver_BAC_gene1 %>% left_join(.,Tabla_inicial_info_mini_bac_short)%>% separate(Class_compound, c('Class_compound', "kk"), sep = ",") %>% select(-kk) %>%  ggplot(aes(x = alelos, y =personas_perc , color = Class_compound)) + geom_point() +
+  theme_classic()+
+  scale_color_d3(palette = "category20")
+
+gene_diver_BAC_gene1 %>% left_join(.,Tabla_inicial_info_mini_bac_short)%>% separate(Class_compound, c('Class_compound', "kk"), sep = ",") %>% select(-kk) %>% filter(Class_compound == "Metal") %>%
+  filter(origin == "guayana") %>% 
+  ggplot(aes(x = alelos, y =personas_perc , color = Compound)) + geom_point() +
+  theme_classic()+
+  scale_color_d3(palette = "category20")
+
+
+gene_diver_BAC_gene1 %>% left_join(.,Tabla_inicial_info_mini_bac_short)%>% separate(Class_compound, c('Class_compound', "kk"), sep = ",") %>% select(-kk) %>% filter(Class_compound != "Metal") %>%
+  filter(origin == "guayana") %>% 
+  ggplot(aes(x = alelos, y =personas_perc , color = Class_compound)) + geom_point() +
+  theme_classic()
+
+```
+
+# Correlations {.tabset .tabset-fade .tabset-pills}
+
+
+## Correlation ABR guayana
+
+```{r}
+flattenCorMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+  )
+}
+
+Guayana_spread_ABR1_guaya<- Tabla_inicial %>% filter(database=="ABR") %>% filter(origin == "guayana") %>% select(-origin) %>%
+  separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  separate(Gen, c("Gen","ID"),sep = "-",remove = FALSE) %>%
+  select(Gen,depth,label) %>% group_by(label, Gen) %>% 
+  summarise(depth_sum = sum(depth)) %>% 
+  ungroup() %>%  spread(Gen,depth_sum, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+cor_abr_simp_guaya <- rcorr(as.matrix(Guayana_spread_ABR1_guaya), type = "pearson")
+correlacion_ABR_resumen_guaya <- flattenCorMatrix(cor_abr_simp_guaya$r, cor_abr_simp_guaya$P) %>% mutate(ajustado = p.adjust(p, method = "fdr")) %>% 
+  filter(ajustado < 0.05)
+
+correlacion_ABR_resumen_spread_guaya <-correlacion_ABR_resumen_guaya %>%  select(row:cor) %>% spread(row, cor, fill = 0) %>% column_to_rownames(var = "column")
+
+datatable(correlacion_ABR_resumen_guaya, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+```
+
+```{r}
+pheatmap(correlacion_ABR_resumen_spread_guaya, clustering_method = "ward.D2")
+
+```
+
+
+## Correlation ABR eur
+
+```{r}
+
+Guayana_spread_ABR1_eur<- Tabla_inicial %>% filter(database=="ABR") %>% filter(origin == "europa") %>% select(-origin) %>%
+  separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  separate(Gen, c("Gen","ID"),sep = "-",remove = FALSE) %>%
+  select(Gen,depth,label) %>% group_by(label, Gen) %>% 
+  summarise(depth_sum = sum(depth)) %>% 
+  ungroup() %>%  spread(Gen,depth_sum, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+cor_abr_simp_eur <- rcorr(as.matrix(Guayana_spread_ABR1_eur), type = "pearson")
+correlacion_ABR_resumen_eur <- flattenCorMatrix(cor_abr_simp_eur$r, cor_abr_simp_eur$P) %>% mutate(ajustado = p.adjust(p, method = "fdr")) %>% 
+  filter(ajustado < 0.05)
+correlacion_ABR_resumen_spread_eur <-correlacion_ABR_resumen_eur %>%  select(row:cor) %>% spread(row, cor, fill = 0) %>% column_to_rownames(var = "column")
+
+datatable(correlacion_ABR_resumen_eur, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+```
+
+```{r}
+pheatmap(correlacion_ABR_resumen_spread_eur, clustering_method = "ward.D2")
+
+```
+
+## Correlation BAC guayana
+
+```{r}
+
+
+Guayana_spread_BAC1_guayana<- Tabla_inicial %>% filter(database == "BAC") %>% filter(origin == "guayana") %>% select(-origin) %>%
+  separate(template, c("ID","Gen"),sep = "_",remove = FALSE) %>% select(-ID) %>%  
+  group_by(label, Gen) %>% summarise(depth_sum = sum(depth)) %>% 
+  ungroup() %>%  spread(Gen,depth_sum, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+cor_bac_simp_guayana <- rcorr(as.matrix(Guayana_spread_BAC1_guayana), type = "pearson")
+
+correlacion_BAC_resumen_guaya <- flattenCorMatrix(cor_bac_simp_guayana$r, cor_bac_simp_guayana$P) %>% mutate(ajustado = p.adjust(p, method = "fdr")) %>% 
+  filter(ajustado < 0.05)
+correlacion_BAC_resumen_guaya_spread <-correlacion_BAC_resumen_guaya %>%  select(row:cor) %>% spread(row, cor, fill = 0) %>% column_to_rownames(var = "column")
+
+datatable(correlacion_BAC_resumen_guaya, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+```
+
+```{r}
+pheatmap(correlacion_BAC_resumen_guaya_spread, clustering_method = "ward.D2")
+```
+
+## Correlation BAC europe
+
+```{r}
+
+
+
+Guayana_spread_BAC1_eur<- Tabla_inicial %>% filter(database == "BAC") %>% filter(origin == "europa") %>% select(-origin) %>%
+  separate(template, c("ID","Gen"),sep = "_",remove = FALSE) %>% select(-ID) %>%  
+  group_by(label, Gen) %>% summarise(depth_sum = sum(depth)) %>% 
+  ungroup() %>%  spread(Gen,depth_sum, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+
+
+cor_bac_simp_eur <- rcorr(as.matrix(Guayana_spread_BAC1_eur), type = "pearson")
+
+correlacion_BAC_resumen_eur <- flattenCorMatrix(cor_bac_simp_eur$r, cor_bac_simp_eur$P) %>% mutate(ajustado = p.adjust(p, method = "fdr")) %>% 
+  filter(ajustado < 0.05)
+ccorrelacion_BAC_resumen_eur_spread <-correlacion_BAC_resumen_eur %>%  select(row:cor) %>% spread(row, cor, fill = 0) %>% column_to_rownames(var = "column")
+         
+
+
+datatable(correlacion_BAC_resumen_eur, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+
+```
+
+```{r}
+pheatmap(ccorrelacion_BAC_resumen_eur_spread, clustering_method = "ward.D2")
+
+```
+
+
+## Correlation ABR BAC guayana
+
+```{r}
+
+Guayana_spread_ABR1_guaya_1<- Tabla_inicial %>% filter(database=="ABR") %>% filter(origin == "guayana") %>% select(-origin) %>%
+  separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  separate(Gen, c("Gen","ID"),sep = "-",remove = FALSE) %>%
+  select(Gen,depth,label) %>% group_by(label, Gen) %>% 
+  summarise(depth_sum = sum(depth)) %>% 
+  ungroup() 
+
+Guayana_spread_BAC1_guayana_1<- Tabla_inicial %>% filter(database == "BAC") %>% filter(origin == "guayana") %>% select(-origin) %>%
+  separate(template, c("ID","Gen"),sep = "_",remove = FALSE) %>% select(-ID) %>%  
+  group_by(label, Gen) %>% summarise(depth_sum = sum(depth)) %>% 
+  ungroup() 
+
+Guayana_spread_BAC_ABR_guayana_1 <- rbind(Guayana_spread_ABR1_guaya_1, Guayana_spread_BAC1_guayana_1) %>% 
+  spread(Gen,depth_sum, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+
+
+cor_abr_bac_simp_guaya <- rcorr(as.matrix(Guayana_spread_BAC_ABR_guayana_1), type = "pearson")
+correlacion_ABR_BAC_resumen_guaya <- flattenCorMatrix(cor_abr_bac_simp_guaya$r, cor_abr_bac_simp_guaya$P) %>% mutate(ajustado = p.adjust(p, method = "fdr")) %>% 
+  filter(ajustado < 0.05)
+
+correlacion_ABR_BAC_resumen_spread_guaya <-correlacion_ABR_BAC_resumen_guaya %>%  select(row:cor) %>% spread(row, cor, fill = 0) %>% column_to_rownames(var = "column")
+
+datatable(correlacion_ABR_BAC_resumen_guaya, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+```{r}
+pheatmap(correlacion_ABR_BAC_resumen_spread_guaya, clustering_method = "ward.D2")
+```
+
+
+
+## Correlation ABR BAC eur
+
+```{r}
+
+GGuayana_spread_ABR1_eur_1<- Tabla_inicial %>% filter(database=="ABR") %>% filter(origin == "europa") %>% select(-origin) %>%
+  separate(template, c("Gen","ID"),sep = "_",remove = FALSE) %>% select(-ID) %>% 
+  separate(Gen, c("Gen","ID"),sep = "-",remove = FALSE) %>%
+  select(Gen,depth,label) %>% group_by(label, Gen) %>% 
+  summarise(depth_sum = sum(depth)) %>% 
+  ungroup()
+
+Guayana_spread_BAC1_eur_1<- Tabla_inicial %>% filter(database == "BAC") %>% filter(origin == "europa") %>% select(-origin) %>%
+  separate(template, c("ID","Gen"),sep = "_",remove = FALSE) %>% select(-ID) %>%  
+  group_by(label, Gen) %>% summarise(depth_sum = sum(depth)) %>% 
+  ungroup() 
+
+Guayana_spread_BAC_ABR_guayana_1 <- rbind(GGuayana_spread_ABR1_eur_1, Guayana_spread_BAC1_eur_1) %>% 
+  spread(Gen,depth_sum, fill = 0)%>% 
+  column_to_rownames(var = "label")
+
+
+cor_abr_bac_simp_eur <- rcorr(as.matrix(Guayana_spread_BAC_ABR_guayana_1), type = "pearson")
+correlacion_ABR_BAC_resumen_eur <- flattenCorMatrix(cor_abr_bac_simp_eur$r, cor_abr_bac_simp_eur$P) %>% mutate(ajustado = p.adjust(p, method = "fdr")) %>% 
+  filter(ajustado < 0.05)
+
+correlacion_ABR_BAC_resumen_spread_eur <-correlacion_ABR_BAC_resumen_eur %>%  select(row:cor) %>% spread(row, cor, fill = 0) %>% column_to_rownames(var = "column")
+
+datatable(correlacion_ABR_BAC_resumen_eur, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T) )
+
+```
+
+```{r}
+pheatmap(correlacion_ABR_BAC_resumen_spread_eur, clustering_method = "ward.D2")
+```
+
+
+# Summary of genes {.tabset .tabset-fade .tabset-pills}
+
+## summary of gene distribution
+
+```{r}
+ABR_common_genes <- tabla_para_teresa_ABR %>%  group_by(Label) %>% summarise(number = n())
+BAC_common_genes<-tabla_para_teresa_BAC %>% distinct(template,Label,TotalFreq) %>%  group_by(Label) %>% summarise(number = n())
+
+ABR_notcommon_genes <- anti_tabla_para_teresa_ABR %>%  group_by(Label) %>% summarise(number = n())
+BAC_notcommon_genes <- anti_tabla_para_teresa_BAC %>%distinct(template,Label,TotalFreq) %>%  group_by(Label) %>% summarise(number = n())
+
+Tipo <- c('ABR','BAC')
+aaEur <- c(ABR_notcommon_genes$number[1],BAC_notcommon_genes$number[1])
+All <- c( ABR_common_genes$number[1],BAC_common_genes$number[1])
+Gui <- c(ABR_notcommon_genes$number[2],BAC_notcommon_genes$number[2])
+mix_num_genes <- data.frame( Tipo, aaEur,All,Gui)
+mix_num_genes %>% pivot_longer(cols=aaEur:Gui, names_to = "cosa", values_to = "value")%>% 
+  ggplot(aes(x = cosa, y = value, fill = Tipo))+geom_col(position = "dodge")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+mix_num_genes %>% pivot_longer(cols=aaEur:Gui, names_to = "cosa", values_to = "value")%>% 
+  ggplot(aes(x = Tipo, y = value, fill = cosa))+geom_col(position = "dodge")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1,strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+mix_num_genes %>% pivot_longer(cols=aaEur:Gui, names_to = "cosa", values_to = "value")
+
+```
+
+## distinct genes
+
+```{r}
+Tabla_inicial %>% select(template, origin, database) %>% distinct() %>% group_by(origin, database)%>% summarise(number = n()) %>% 
+  ggplot(aes(x = database, y = number, fill = origin))+geom_col(position = "dodge")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1,strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+Tabla_inicial %>% select(template, origin, database) %>% distinct() %>% group_by(origin, database)%>% summarise(number = n())
+
+```
+
+## Core genes
+
+```{r core,echo=FALSE,warning=FALSE,message=FALSE}
+info <- Tabla_inicial %>% select(template, database) %>% distinct()
+
+tabla_core1 <- left_join(tabla_core, info, by = 'template') %>% group_by(database) %>% summarise(n())
+tabla_core_eur1<- left_join(tabla_core_eur, info, by = 'template')%>% group_by(database) %>% summarise(n())
+tabla_core_guayana1<- left_join(tabla_core_guayana, info, by = 'template')%>% group_by(database) %>% summarise(n())
+
+
+
+Tipo <- c('ABR','BAC')
+aaEur <- c(tabla_core_eur1$`n()`[1],0)
+
+All <- c(tabla_core1$`n()`[1],0)
+Gui <- c(tabla_core_guayana1$`n()`[1],0)
+
+
+core_num_genes <- data.frame( Tipo, aaEur,All,Gui)
+
+core_num_genes %>% pivot_longer(cols=aaEur:Gui, names_to = "cosa", values_to = "value")%>% 
+  ggplot(aes(x = cosa, y = value, fill = Tipo))+geom_col(position = "dodge")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+core_num_genes %>% pivot_longer(cols=aaEur:Gui, names_to = "cosa", values_to = "value") %>% 
+  ggplot(aes(x = Tipo, y = value, fill = cosa))+geom_col(position = "dodge")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+core_num_genes %>% pivot_longer(cols=aaEur:Gui, names_to = "cosa", values_to = "value")
+
+```
+
+# Hist of Genes {.tabset .tabset-fade .tabset-pills}
+
+## hist all genes
+
+```{r table of common,echo=FALSE,warning=FALSE,message=FALSE}
+
+tabla_completa_t0 <- Tabla_inicial  %>%  group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_freq <- tabla_completa_t0  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+
+tabla_completa_t0_freq$core <- 'Shell_genes'
+tabla_completa_t0_freq$core[tabla_completa_t0_freq$TotalFreq < 24.8] = "Scarce_genes" 
+tabla_completa_t0_freq$core[tabla_completa_t0_freq$TotalFreq > 111.6] = "Core_genes" 
+
+ggplot(tabla_completa_t0_freq,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+```
+
+## hist all genes LOG
+
+```{r table of common log,echo=FALSE,warning=FALSE,message=FALSE}
+
+ggplot(tabla_completa_t0_freq,aes(x=TotalFreq, y=log(TotalFreq_freq), fill=factor(core)))+geom_col()+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, strip.background = element_blank(),legend.position = "none",
+        axis.text.x = element_text(angle = 45,  hjust=1))+
+  geom_smooth(method = "lm", se = FALSE)
+
+
+```
+
+## hist all genes europe_t0
+
+```{r table of common europe_t0,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_europe_t0 <- Tabla_inicial %>%  filter(origin=="europa")  %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_europe_t0_freq <- tabla_completa_europe_t0  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+
+tabla_completa_europe_t0_freq$core <- 'Shell_genes'
+tabla_completa_europe_t0_freq$core[tabla_completa_europe_t0_freq$TotalFreq < 5.8] = "Scarce_genes" 
+tabla_completa_europe_t0_freq$core[tabla_completa_europe_t0_freq$TotalFreq > 26.1] = "Core_genes" 
+
+
+ggplot(tabla_completa_europe_t0_freq,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()
+```
+
+## hist all genes europe_t0 LOG
+
+```{r table of common europe_t0 log ,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+ggplot(tabla_completa_europe_t0_freq,aes(x=TotalFreq, y=log(TotalFreq_freq), fill=factor(core)))+geom_col()+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, strip.background = element_blank(),legend.position = "none", 
+        axis.text.x = element_text(angle = 45,  hjust=1))+ 
+  geom_smooth(method = "glm", se = FALSE)
+
+```
+
+## hist all genes guayana
+
+```{r table of common  guayana,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_guayana_t0 <- Tabla_inicial %>% filter(origin=="guayana")  %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_guayana_freq <- tabla_completa_guayana_t0  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+
+tabla_completa_t0_guayana_freq$core <- 'Shell_genes'
+tabla_completa_t0_guayana_freq$core[tabla_completa_t0_guayana_freq$TotalFreq < 19] = "Scarce_genes" 
+tabla_completa_t0_guayana_freq$core[tabla_completa_t0_guayana_freq$TotalFreq > 85.5] = "Core_genes" 
+
+
+ggplot(tabla_completa_t0_guayana_freq,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()
+
+```
+
+## hist all genes guayana LOG
+
+```{r table of common  guayana log ,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+ggplot(tabla_completa_t0_guayana_freq,aes(x=TotalFreq, y=log(TotalFreq_freq), fill=factor(core)))+geom_col()+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, strip.background = element_blank(),legend.position = "none", 
+        axis.text.x = element_text(angle = 45,  hjust=1))+ 
+  geom_smooth(method = "glm", se = FALSE)
+
+```
+
+## hist ABR
+
+```{r hist ABR,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_t0_ABR <- Tabla_inicial %>% filter(database =="ABR") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_freq_ABR <- tabla_completa_t0_ABR  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+tabla_completa_t0_freq_ABR$core <- 'Shell_genes'
+tabla_completa_t0_freq_ABR$core[tabla_completa_t0_freq_ABR$TotalFreq < 24.8] = "Scarce_genes" 
+tabla_completa_t0_freq_ABR$core[tabla_completa_t0_freq_ABR$TotalFreq > 111.6] = "Core_genes" 
+
+ggplot(tabla_completa_t0_freq_ABR,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()+
+  geom_smooth(method = "glm", se = FALSE)
+
+```
+
+## hist ABR log
+
+```{r hist ABR log,echo=FALSE,warning=FALSE,message=FALSE}
+
+ggplot(tabla_completa_t0_freq_ABR,aes(x=TotalFreq, y=log(TotalFreq_freq), fill=factor(core)))+geom_col()
+
+```
+
+## hist BAC
+
+```{r hist BAC ,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_t0_BAC <- Tabla_inicial %>% filter(database =="BAC") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_freq_BAC <- tabla_completa_t0_BAC  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+tabla_completa_t0_freq_BAC$core <- 'Shell_genes'
+tabla_completa_t0_freq_BAC$core[tabla_completa_t0_freq_BAC$TotalFreq < 24.8] = "Scarce_genes" 
+tabla_completa_t0_freq_BAC$core[tabla_completa_t0_freq_BAC$TotalFreq > 111.6] = "Core_genes"
+
+ggplot(tabla_completa_t0_freq_BAC,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()
+
+```
+
+## hist BAC log
+
+```{r hist BAC log,echo=FALSE,warning=FALSE,message=FALSE}
+
+ggplot(tabla_completa_t0_freq_BAC,aes(x=TotalFreq, y=log(TotalFreq_freq), fill=factor(core)))+geom_col()
+
+```
+
+
+
+
+
+## hist ABR Guayana
+
+```{r hist ABR Guayana,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_t0_ABR <- Tabla_inicial %>% filter(origin=="guayana")%>% filter(database =="ABR") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_freq_ABR <- tabla_completa_t0_ABR  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+tabla_completa_t0_freq_ABR$core <- 'Shell_genes'
+tabla_completa_t0_freq_ABR$core[tabla_completa_t0_freq_ABR$TotalFreq < 19] = "Scarce_genes" 
+tabla_completa_t0_freq_ABR$core[tabla_completa_t0_freq_ABR$TotalFreq > 85.5] = "Core_genes" 
+
+ggplot(tabla_completa_t0_freq_ABR,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()
+
+```
+
+## hist BAC Guayana
+
+```{r hist BAC Guayana,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_t0_BAC <- Tabla_inicial %>% filter(origin=="guayana")%>% filter(database =="BAC") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_freq_BAC <- tabla_completa_t0_BAC  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+tabla_completa_t0_freq_BAC$core <- 'Shell_genes'
+tabla_completa_t0_freq_BAC$core[tabla_completa_t0_freq_BAC$TotalFreq < 19] = "Scarce_genes" 
+tabla_completa_t0_freq_BAC$core[tabla_completa_t0_freq_BAC$TotalFreq > 85.5] = "Core_genes" 
+
+ggplot(tabla_completa_t0_freq_BAC,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()
+
+```
+
+
+
+## hist ABR Europe
+
+```{r hist ABR Europe,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_t0_ABR <- Tabla_inicial %>% filter(origin=="europa")%>% filter(database =="ABR") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_freq_ABR <- tabla_completa_t0_ABR  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+tabla_completa_t0_freq_ABR$core <- 'Shell_genes'
+tabla_completa_t0_freq_ABR$core[tabla_completa_t0_freq_ABR$TotalFreq < 5.8] = "Scarce_genes" 
+tabla_completa_t0_freq_ABR$core[tabla_completa_t0_freq_ABR$TotalFreq > 26.1] = "Core_genes" 
+
+ggplot(tabla_completa_t0_freq_ABR,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()
+
+```
+
+## hist BAC Europe
+
+```{r hist BAC Europe,echo=FALSE,warning=FALSE,message=FALSE}
+tabla_completa_t0_BAC <- Tabla_inicial %>% filter(origin=="europa")%>% filter(database =="BAC") %>% group_by(template) %>% summarise(TotalFreq = n())%>% ungroup()
+tabla_completa_t0_freq_BAC <- tabla_completa_t0_BAC  %>% group_by(TotalFreq) %>% summarise(TotalFreq_freq = n())
+tabla_completa_t0_freq_BAC$core <- 'Shell_genes'
+tabla_completa_t0_freq_BAC$core[tabla_completa_t0_freq_BAC$TotalFreq < 5.8] = "Scarce_genes" 
+tabla_completa_t0_freq_BAC$core[tabla_completa_t0_freq_BAC$TotalFreq > 26.1] = "Core_genes" 
+
+ggplot(tabla_completa_t0_freq_BAC,aes(x=TotalFreq, y=TotalFreq_freq, fill=factor(core)))+geom_col()
+
+```
+
+
+
+# Resistance genes diversity in population {.tabset .tabset-fade .tabset-pills}
+
+## ABR diversity
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE, fig.width=20, fig.height=10}
+
+
+Tabla_inicial_info_mini <- Tabla_inicial_info %>% filter(database == 'ABR') %>% select(template, Class) %>% distinct()
+
+
+Tabla_inicial %>% filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ggplot(aes(x=label,y=TotalDepth,fill=Class)) + geom_col(position = "fill") +  theme(axis.text.x = element_text(angle = 90, hjust = 1))  + scale_fill_viridis(discrete=TRUE, option = "D") +
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+
+Tabla_inicial %>% filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ggplot(aes(x=label,y=TotalDepth,fill=Class)) + geom_col() +  theme(axis.text.x = element_text(angle = 90, hjust = 1))  + scale_fill_viridis(discrete=TRUE, option = "C") +
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+```
+
+
+
+## BAC diversity
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE,fig.width=20, fig.height=10}
+
+Tabla_inicial_info %>% filter(database == "BAC") %>% distinct() %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ggplot(aes(x=label,y=TotalDepth,fill=Class_compound)) + geom_col(position = "fill") +  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_fill_viridis(discrete=TRUE, option = "C")
+
+
+Tabla_inicial_info %>% filter(database == "BAC") %>% distinct() %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ggplot(aes(x=label,y=TotalDepth,fill=Class_compound)) + geom_col()+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_fill_viridis(discrete=TRUE, option = "C")
+
+```
+
+# Resistance genes diversity in cohort and origin {.tabset .tabset-fade .tabset-pills}
+
+## ABR diversity in origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+Tabla_abr_diversity <- Tabla_inicial %>%  filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% 
+  separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>%
+  ungroup() %>% group_by(origin, Class) %>% summarise(percentage=mean(percentage)) %>% ungroup()
+
+
+Others_abr <- Tabla_abr_diversity %>% group_by(origin) %>% filter(percentage<5) %>% mutate(sum(percentage))
+
+othergui <- c("guayana","Other",3.471194)
+othereur <- c("europa","Other",7.182387)
+
+Tabla_abr_diversity <- Tabla_abr_diversity %>% filter(percentage>5)
+
+Tabla_abr_diversity <- rbind(Tabla_abr_diversity,othergui,othereur)
+
+Tabla_abr_diversity %>% ggplot(aes(x=origin,y=as.numeric(percentage),fill=Class)) + geom_col(position = "fill") +
+  theme_classic()+
+  scale_fill_d3()
+
+
+Tabla_abr_diversityz <- Tabla_inicial %>%  filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% 
+  separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>% 
+  ungroup()
+
+Tabla_abr_diversityzz <- Tabla_abr_diversityz %>% select(Class, origin) %>% distinct()
+
+wilcox_abr <- Tabla_abr_diversityz %>% filter(Class!="Steroid antibacterial",Class!="Oxazolidinone") %>% 
+  group_by(Class) %>% ungroup() %>% 
+  do(tidy(wilcox.test(.$percentage~.$origin)))
+datatable(wilcox_abr, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+
+
+
+```
+
+## ABR diversity depth
+
+```{r ABR diversity depth, echo=FALSE,warning=FALSE,message=FALSE}
+
+
+grouped_ggbetweenstats(
+  data  = Tabla_inicial %>%  filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% 
+  separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,label,origin) %>% summarise(TotalDepth = sum(depth)),
+  x     = origin,
+  y     = TotalDepth,
+  type = "np",
+  grouping.var = Class,
+  ggplot.component = ggplot2::scale_y_continuous(limits = (c(1, 204196.13)))
+  )
+
+```
+
+## ABR diversity percentage
+rmtF_1_JQ808129
+```{r ABR diversity percentage,echo=FALSE,warning=FALSE,message=FALSE}
+grouped_ggbetweenstats(
+  Tabla_inicial %>% filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>%
+    group_by(Class,origin, template) %>% summarise(TotalFreq = n()) %>% ungroup() %>%  mutate(percent = (ifelse(origin == "europa", TotalFreq/29*100, TotalFreq/95*100))) ,
+  x     = origin,
+  y     = percent,
+  type = "np",
+  grouping.var = Class,
+  ggplot.component = ggplot2::scale_y_continuous(limits = (c(0, 100))))
+
+filtrado <- c("Aminoglycoside", "Beta-lactam", "Macrolide", "Tetracycline")
+
+grouped_ggbetweenstats(
+  Tabla_inicial %>% filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>%
+    group_by(Class,origin, template) %>% summarise(TotalFreq = n()) %>% ungroup() %>%  mutate(percent = (ifelse(origin == "europa", TotalFreq/29*100, TotalFreq/95*100))) %>% filter(Class %in% filtrado),
+  x     = origin,
+  y     = percent,
+  type = "np",
+  grouping.var = Class,
+  ggplot.component = ggplot2::scale_y_continuous(limits = (c(0, 100))))
+```
+
+
+## BAC diversity in origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+
+
+
+Tabla_bac_diversity <- Tabla_inicial_info %>% filter(database == "BAC") %>% distinct() %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>% 
+  ungroup() %>% group_by(origin, Class_compound) %>% summarise(percentage=mean(percentage)) %>% ungroup()
+
+
+Others_bac <- Tabla_bac_diversity %>% group_by(origin) %>% filter(percentage<5) %>% mutate(sum(percentage))
+
+
+othergui <- c("guayana","Other",28.82399)
+othereur <- c("europa","Other",24.55387)
+
+
+Tabla_bac_diversity <- Tabla_bac_diversity %>% filter(percentage>5)
+
+
+Tabla_bac_diversity <- rbind(Tabla_bac_diversity,othergui,othereur)
+
+
+Tabla_bac_diversity %>% ggplot(aes(x=origin,y=as.numeric(percentage),fill=Class_compound)) + geom_col(position = "fill") +
+  scale_fill_npg()+
+  theme_classic()
+
+
+Tabla_bac_diversity %>% ggplot(aes(x=origin,y=as.numeric(percentage),fill=Class_compound)) + geom_col(position = "fill") + scale_fill_viridis(discrete=TRUE, option = "D")+ 
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+Tabla_bac_diversityz <- Tabla_inicial_info %>% filter(database == "BAC") %>% distinct() %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>% 
+  ungroup()
+Tabla_bac_diversityzz <- Tabla_bac_diversityz %>% select(Class_compound, origin) %>% distinct()
+
+wilcox_bac <- Tabla_bac_diversityz %>% filter(Class_compound!="Diphenylhexatriene") %>% 
+  group_by(Class_compound) %>% ungroup() %>% 
+  do(tidy(wilcox.test(.$percentage~.$origin)))
+datatable(wilcox_bac, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+
+```
+
+## BAC metals diversity in origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+
+
+
+Tabla_bac_metal_diversity <- Tabla_inicial_info %>% filter(database_BAC == "BAC_Metal") %>% distinct() %>% group_by(Compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>% 
+  ungroup() %>% group_by(origin, Compound) %>% summarise(percentage=mean(percentage)) %>% ungroup()
+
+
+Others_bac_metal <- Tabla_bac_metal_diversity %>% group_by(origin) %>% filter(percentage<5) %>% mutate(sum(percentage))
+
+othergui <- c("guayana","Other",32.11314)
+othereur <- c("europa","Other",27.22978
+)
+
+Tabla_bac_metal_diversity <- Tabla_bac_metal_diversity %>% filter(percentage>5)
+
+
+Tabla_bac_metal_diversity <- rbind(Tabla_bac_metal_diversity,othergui,othereur)
+
+
+Tabla_bac_metal_diversity %>% ggplot(aes(x=origin,y=as.numeric(percentage),fill=Compound)) + geom_col(position = "fill") + 
+  scale_fill_d3()+
+  theme_classic()
+
+
+Tabla_bac_metal_diversity %>% ggplot(aes(x=origin,y=as.numeric(percentage),fill=Compound)) + geom_col(position = "fill") + scale_fill_viridis(discrete=TRUE, option = "D")+ 
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+Tabla_bac_metal_diversityz <- Tabla_inicial_info %>% filter(database_BAC == "BAC_Metal") %>% distinct() %>% group_by(Compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>% ungroup()
+Tabla_bac_metal_diversityzz <- Tabla_bac_metal_diversityz %>% select(Compound, origin) %>% distinct()
+
+wilcox_bac_metal <- Tabla_bac_metal_diversityz %>% filter(Compound!="Aluminium (Al)") %>% 
+  group_by(Compound) %>% ungroup() %>% 
+  do(tidy(wilcox.test(.$percentage~.$origin)))
+datatable(wilcox_bac_metal, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+
+
+Tabla_inicial_info %>% filter(database_BAC == "BAC_Metal") %>% distinct() %>% group_by(Compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>% group_by(origin, Compound) %>% mutate(qq = n()) %>% ungroup() %>%  mutate(percent = (ifelse(origin == "europa", qq/29*100, qq/95*100))) %>% filter(percent > 5) %>%
+  ggplot(aes(x=Compound,y=TotalDepth,fill=origin)) + 
+  geom_boxplot(varwidth = TRUE) +
+  scale_y_log10() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle ("ARG depth") +xlab("ARG class") +ylab("depth")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+```
+
+## BAC biocide diversity in origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+Tabla_bac_biocide_diversity <- Tabla_inicial_info %>% filter(database_BAC == "BAC_Biocide") %>% distinct() %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>% 
+  ungroup()%>% group_by(origin, Class_compound) %>% summarise(percentage=mean(percentage)) %>% ungroup()
+
+
+Others_bac_biocide <- Tabla_bac_biocide_diversity %>% group_by(origin) %>% filter(percentage<5) %>% mutate(sum(percentage))
+
+othergui <- c("guayana","Other",37.14170)
+othereur <- c("europa","Other",28.84836)
+
+Tabla_bac_biocide_diversity <- Tabla_bac_biocide_diversity %>% filter(percentage>5)
+
+
+Tabla_bac_biocide_diversity <- rbind(Tabla_bac_biocide_diversity,othergui,othereur)
+
+
+Tabla_bac_biocide_diversity %>% ggplot(aes(x=origin,y=as.numeric(percentage),fill=Class_compound)) + geom_col(position = "fill") +   
+  scale_fill_d3()+
+  theme_classic()
+
+
+Tabla_bac_biocide_diversity %>% ggplot(aes(x=origin,y=as.numeric(percentage),fill=Class_compound)) + geom_col(position = "fill") + scale_fill_viridis(discrete=TRUE, option = "D")+ 
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+Tabla_bac_biocide_diversityz <- Tabla_inicial_info %>% filter(database_BAC == "BAC_Biocide") %>% distinct() %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>%
+  group_by(label) %>% 
+  mutate(count_sum= sum(TotalDepth),
+         percentage = TotalDepth/count_sum * 100) %>% 
+  ungroup()
+
+Tabla_bac_biocide_diversityzz <- Tabla_bac_biocide_diversityz %>% select(Class_compound, origin) %>% distinct()
+
+wilcox_bac_biocide <- Tabla_bac_biocide_diversityz %>% filter(Class_compound!="Diphenylhexatriene") %>% 
+  group_by(Class_compound) %>% ungroup() %>% 
+  do(tidy(wilcox.test(.$percentage~.$origin)))
+datatable(wilcox_bac_biocide, rownames = FALSE, filter="top",  options = list(pageLength = 30, scrollX=T, scrollY=T))
+
+
+Tabla_inicial_info %>% filter(database_BAC == "BAC_Biocide") %>% distinct() %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth)) %>% ungroup() %>% group_by(origin, Class_compound) %>% mutate(qq = n()) %>% ungroup() %>%  mutate(percent = (ifelse(origin == "europa", qq/29*100, qq/95*100))) %>% filter(percent > 5) %>%
+  ggplot(aes(x=Class_compound,y=TotalDepth,fill=origin)) + 
+  geom_boxplot(varwidth = TRUE) +
+  # geom_jitter(colour=origin, alpha = 0.1)+
+  scale_y_log10() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle ("ARG depth") +xlab("ARG class") +ylab("depth")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+```
+
+# Total freq of Resistance genes {.tabset .tabset-fade .tabset-pills}
+
+## ABR freq by origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_inicial %>% filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,label,origin) %>% summarise(TotalFreq = n()) %>% ggplot(aes(x=Class,y=TotalFreq,fill=origin)) + geom_boxplot() +scale_y_log10() + theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+Tabla_inicial %>% filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,origin, template) %>% summarise(TotalFreq = n()) %>% ggplot(aes(x=Class,y=TotalFreq,fill=origin)) + geom_boxplot() +scale_y_log10() + theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+```
+
+## depth of BAC by origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_inicial_info %>% filter(database == "BAC") %>% distinct() %>% group_by(Class_compound,label,origin) %>%  summarise(TotalFreq = n())  %>% ggplot(aes(x=Class_compound,y=TotalFreq,fill=origin)) + geom_boxplot() +scale_y_log10() + theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+```
+
+
+
+# Total depth of Resistance genes {.tabset .tabset-fade .tabset-pills}
+
+## depth of ABR by origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_inicial%>% filter(database == "ABR") %>% left_join(., Tabla_inicial_info_mini) %>% separate(Class, c('Class', "kk"), sep = ",") %>% select(-kk) %>% group_by(Class,label,origin) %>%  summarise(TotalDepth = sum(depth)) %>% ggplot(aes(x=Class,y=TotalDepth,fill=origin)) + geom_boxplot() +scale_y_log10()+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+```
+
+## depth of BAC by origin
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+Tabla_inicial_info %>% filter(database == "BAC") %>% distinct()  %>% group_by(Class_compound,label,origin) %>% summarise(TotalDepth = sum(depth))  %>% ggplot(aes(x=Class_compound,y=TotalDepth,fill=origin)) + geom_boxplot() +scale_y_log10() + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
+
+# CHI-SQUARE PERCENTAGES {.tabset .tabset-fade .tabset-pills}
+
+```{r CHI-SQUARE, warning= FALSE, message=FALSE}
+
+
+tabla_america <- Tabla_inicial %>% filter(origin == "guayana") %>% group_by(label) %>% distinct(template,label, .keep_all = TRUE) %>% ungroup %>%
+  group_by(template) %>% summarize(suma = n())
+
+tabla_europa <- Tabla_inicial %>% filter(origin == "europa") %>% group_by(label) %>% distinct(template,label, .keep_all = TRUE) %>% ungroup %>% 
+  group_by(template) %>% summarize(suma = n())
+
+tabla_chi <- full_join(tabla_europa, tabla_america, by= "template") 
+colnames(tabla_chi) <- c("template","europe_P", "america_P" )
+
+tabla_chi[is.na(tabla_chi)] <- 0
+tabla_chi_filt <- tabla_chi %>% mutate(europe_N = 29 - europe_P ) %>% mutate(america_N = 95 - america_P )#%>% filter(europe_P > 2 | america_P > 9 )
+
+chi_pvalue <- tabla_chi_filt %>%
+  rowwise() %>%
+  mutate(
+    p.value = fisher.test(matrix(c(europe_P, europe_N, america_P, america_N), nrow = 2))$p.value,
+    odds_ratio = fisher.test(matrix(c(europe_P, europe_N, america_P, america_N), nrow = 2))$estimate,
+  )
+
+colnames(chi_pvalue) <- c("template","europe_P","america_P","europe_N","america_N","p_value", "odds_ratio")
+chi_pvalue <- as.data.frame(chi_pvalue)
+chi_pvalue.adj <-chi_pvalue %>% mutate(padj= p.adjust(chi_pvalue$p_value, method = "BH")) #%>% filter(padj<0.05)
+
+chi_pvalue.adj <- chi_pvalue.adj %>% mutate(america_odds = europe_P*america_N) %>% mutate(europe_odds = america_P*europe_N)
+chi_pvalue.adj <- chi_pvalue.adj %>% mutate(result1= america_odds/europe_odds) %>% mutate(result2 = europe_odds/america_odds)
+chi_pvalue.adj <- chi_pvalue.adj %>% mutate(porcentaje_eur=europe_P/(europe_P+europe_N)) %>% mutate(porcentaje_amer=america_P/(america_P+america_N))
+chi_pvalue.adj[is.na(chi_pvalue.adj)] <- 0
+chi_pvalue.adj$odds_ratio <- ifelse(chi_pvalue.adj$odds_ratio < 1, -1/chi_pvalue.adj$odds_ratio, chi_pvalue.adj$odds_ratio )
+chi_pvalue.adj$direction <- ifelse(chi_pvalue.adj$odds_ratio < 0, 'america', 'europe')
+
+tmpp <- Tabla_inicial %>% select(template, database) %>% distinct()
+chi_pvalue.adj <- left_join(chi_pvalue.adj, tmpp, by = "template")
+
+
+fisher_abr <- chi_pvalue.adj %>% filter(database == "ABR") %>% slice_min(padj, n = 5)
+fisher_bac <- chi_pvalue.adj %>% filter(database == "BAC") %>% slice_min(padj, n = 5)
+fisher_label <- bind_rows(fisher_abr,fisher_bac) %>% select(template)
+fisher_label$label <- fisher_label$template
+
+
+chi_pvalue.adj.plot <- chi_pvalue.adj
+chi_pvalue.adj.plot$fisher <- ifelse(chi_pvalue.adj.plot$padj<0.05, "yes", "no" ) 
+chi_pvalue.adj.plot <- left_join(chi_pvalue.adj.plot, fisher_label)
+
+chi_pvalue.adj.plot %>% ggplot(aes(porcentaje_eur, porcentaje_amer, color= fisher))+geom_point()+
+  geom_text_repel(aes(label=label),hjust = 0, nudge_x = 0.05, max.overlaps = 99)+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+
+chi_pvalue.adj <-chi_pvalue.adj %>% filter(padj<0.05)
+
+
+
+chi_pvalue_abr <- chi_pvalue.adj %>% filter(database == "ABR")
+chi_pvalue_abr_short <- chi_pvalue.adj %>%filter(database == "ABR")
+
+
+chi_pvalue_bac <- chi_pvalue.adj %>% filter(database == "BAC")
+
+```
+
+## ABR Percentages by padj 2 colors
+
+```{r, fig.height=15, fig.width=10}
+chi_pvalue_abr_short_longzzz <- chi_pvalue_abr_short %>% 
+  select(template,porcentaje_eur,porcentaje_amer) %>%
+  melt( id.vars = 'template')
+
+chi_pvalue_abr_short_longzzz$value <- ifelse(chi_pvalue_abr_short_longzzz$variable == 'porcentaje_eur', chi_pvalue_abr_short_longzzz$value*-1, chi_pvalue_abr_short_longzzz$value)
+
+joinedabr <- full_join(chi_pvalue_abr_short_longzzz, chi_pvalue_abr_short, by='template')
+
+joinedabrz <- joinedabr %>% arrange(desc(value))
+
+americcc <- joinedabrz %>% filter(variable == 'porcentaje_amer')
+europpp <- joinedabrz %>% filter(variable == 'porcentaje_eur')
+
+ggplot() +
+  geom_col(data=americcc, aes(reorder(template, -padj), value, fill=padj)) +
+  scale_fill_viridis_c(option = "D") +
+  new_scale_fill() +
+  geom_col(data= europpp, aes(reorder(template, -padj), value, fill=padj)) +
+  scale_fill_viridis_c(option = "C")+
+  coord_flip()
+
+
+```
+
+## BAC Percentages by padj 2 colors
+
+```{r, fig.height=15, fig.width=10}
+
+chi_pvalue_BAC_short_longzzz <- chi_pvalue_bac %>% 
+  select(template,porcentaje_eur,porcentaje_amer) %>%
+  melt( id.vars = 'template')
+
+chi_pvalue_BAC_short_longzzz$value <- ifelse(chi_pvalue_BAC_short_longzzz$variable == 'porcentaje_eur', chi_pvalue_BAC_short_longzzz$value*-1, chi_pvalue_BAC_short_longzzz$value)
+
+joinedBAC <- full_join(chi_pvalue_BAC_short_longzzz, chi_pvalue_bac, by='template')
+joinedBACz <- joinedBAC %>% arrange(desc(value))
+
+americcc <- joinedBACz %>% filter(variable == 'porcentaje_amer')
+europpp <- joinedBACz %>% filter(variable == 'porcentaje_eur')
+
+ggplot() +
+  geom_col(data=americcc, aes(reorder(template, -padj), value, fill=padj)) +
+  scale_fill_viridis_c(option = "D") +
+  new_scale_fill() +
+  geom_col(data= europpp, aes(reorder(template, -padj), value, fill=padj)) +
+  scale_fill_viridis_c(option = "C")+
+  coord_flip()
+```
+
+
+# Lefse {.tabset .tabset-fade .tabset-pills}
+
+## Lefse general
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+OTU = otu_table(Guayana_spread, taxa_are_rows = FALSE)
+
+Guayana_spread_tax <- as.data.frame(t(Guayana_spread)) 
+Guayana_spread_tax$Species <- row.names(Guayana_spread_tax)
+Guayana_spread_tax <- Guayana_spread_tax %>% select(Species)
+Guayana_spread_tax <- as.matrix(Guayana_spread_tax)
+
+TAX = tax_table(Guayana_spread_tax)
+
+meta <- Tabla_inicial_all
+meta <- sample_data(meta)
+sample_names(meta) <- meta$label
+
+physeqmer <- merge_phyloseq(OTU, TAX, meta)
+
+res_origin_LEFSE <- ldamarker(physeqmer,group="origin")
+
+```
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+plotLDA(res_origin_LEFSE,group=c("europa","guayana"),lda=4,pvalue=0.05)
+
+```
+
+## Lefse ABR
+
+```{r, message=FALSE, include=FALSE}
+
+OTU = otu_table(Guayana_spread_ABR, taxa_are_rows = FALSE)
+
+Guayana_spread_tax_ABR <- as.data.frame(t(Guayana_spread_ABR)) 
+Guayana_spread_tax_ABR$Species <- row.names(Guayana_spread_tax_ABR)
+Guayana_spread_tax_ABR <- Guayana_spread_tax_ABR %>% select(Species)
+Guayana_spread_tax_ABR <- as.matrix(Guayana_spread_tax_ABR)
+
+TAX = tax_table(Guayana_spread_tax_ABR)
+
+meta <- Tabla_inicial_all
+meta <- sample_data(meta)
+sample_names(meta) <- meta$label
+
+physeqmer <- merge_phyloseq(OTU, TAX, meta)
+
+
+res_origin_ABR_LEFSE <- ldamarker(physeqmer,group="origin", normalize = 'relative')
+
+```
+
+```{r}
+plotLDA(res_origin_ABR_LEFSE,group=c("europa","guayana"),lda=3,pvalue=0.05)
+
+```
+
+## Lefse BAC
+
+```{r,include=FALSE}
+
+OTU = otu_table(Guayana_spread_BAC, taxa_are_rows = FALSE)
+
+Guayana_spread_tax_BAC <- as.data.frame(t(Guayana_spread_BAC)) 
+Guayana_spread_tax_BAC$Species <- row.names(Guayana_spread_tax_BAC)
+Guayana_spread_tax_BAC <- Guayana_spread_tax_BAC %>% select(Species)
+Guayana_spread_tax_BAC <- as.matrix(Guayana_spread_tax_BAC)
+
+TAX = tax_table(Guayana_spread_tax_BAC)
+
+meta <- Tabla_inicial_all
+meta <- sample_data(meta)
+sample_names(meta) <- meta$label
+
+physeqmer <- merge_phyloseq(OTU, TAX, meta)
+
+
+res_origin_BAC_LEFSE <- ldamarker(physeqmer,group="origin")
+
+```
+
+```{r, fig.height=5, fig.width=15}
+plotLDA(res_origin_BAC_LEFSE,group=c("europa","guayana"),lda=4,pvalue=0.05)
+
+```
+
+
+# LDA {.tabset .tabset-fade .tabset-pills}
+
+## GLM ALL
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+GLM_abr <- Guayana_spread_ABR_t %>% 
+  as_tibble(rownames = "sample") %>% 
+  pivot_longer(names_to = "template", values_to = "depth", c(-origin,-sample)) %>% 
+  mutate(origin = as.factor(origin)) %>% 
+  group_by(template) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  # sample_n(20) %>% 
+  mutate(model = map(data, ~glm(log(depth+1) ~ origin, data = ., family = gaussian))) %>% 
+  mutate(test = map(model, ~estimate_contrasts(.,"origin"))) %>% 
+  unnest(test) %>% 
+  mutate(p.adj = p.adjust(p, "BH"))
+GLM_abr_filt <- GLM_abr %>% select(-data,-model) %>% filter(p.adj<0.05)
+
+
+GLM_bac <- Guayana_spread_BAC_t %>% 
+  as_tibble(rownames = "sample") %>% 
+  pivot_longer(names_to = "template", values_to = "depth", c(-origin,-sample)) %>% 
+  mutate(origin = as.factor(origin)) %>% 
+  group_by(template) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  # sample_n(20) %>% 
+  mutate(model = map(data, ~glm(log(depth+1) ~ origin, data = ., family = gaussian))) %>% 
+  mutate(test = map(model, ~estimate_contrasts(.,"origin"))) %>% 
+  unnest(test) %>% 
+  mutate(p.adj = p.adjust(p, "BH"))
+GLM_bac_filt <- GLM_bac %>% select(-data,-model) %>% filter(p.adj<0.05)
+
+
+GLM_metal <- Guayana_spread_BAC_Metal_t %>% 
+  as_tibble(rownames = "sample") %>% 
+  pivot_longer(names_to = "template", values_to = "depth", c(-origin,-sample)) %>% 
+  mutate(origin = as.factor(origin)) %>% 
+  group_by(template) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  # sample_n(20) %>% 
+  mutate(model = map(data, ~glm(log(depth+1) ~ origin, data = ., family = gaussian))) %>% 
+  mutate(test = map(model, ~estimate_contrasts(.,"origin"))) %>% 
+  unnest(test) %>% 
+  mutate(p.adj = p.adjust(p, "BH"))
+GLM_metal_filt <- GLM_metal %>% select(-data,-model) %>% filter(p.adj<0.05)
+
+GLM_biocide <- Guayana_spread_BAC_Biocide_t %>% 
+  as_tibble(rownames = "sample") %>% 
+  pivot_longer(names_to = "template", values_to = "depth", c(-origin,-sample)) %>% 
+  mutate(origin = as.factor(origin)) %>% 
+  group_by(template) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  # sample_n(20) %>% 
+  mutate(model = map(data, ~glm(log(depth+1) ~ origin, data = ., family = gaussian))) %>% 
+  mutate(test = map(model, ~estimate_contrasts(.,"origin"))) %>% 
+  unnest(test) %>% 
+  mutate(p.adj = p.adjust(p, "BH"))
+GLM_biocide_filt <- GLM_biocide %>% select(-data,-model) %>% filter(p.adj<0.05)
+
+glm_all <- bind_rows(GLM_abr_filt, GLM_bac_filt)
+glm_all_nofilt <- bind_rows(GLM_abr, GLM_bac)
+
+GLM_abr_filt$direction <- ifelse(GLM_abr_filt$Difference > 0, "Europe", "Guiana" )
+GLM_bac_filt$direction <- ifelse(GLM_bac_filt$Difference > 0, "Europe", "Guiana" )
+GLM_metal_filt$direction <- ifelse(GLM_metal_filt$Difference > 0, "Europe", "Guiana" )
+GLM_biocide_filt$direction <- ifelse(GLM_biocide_filt$Difference > 0, "Europe", "Guiana" )
+
+GLM_abr$direction <- ifelse(GLM_abr$Difference > 0, "Europe", "Guiana" )
+GLM_bac$direction <- ifelse(GLM_bac$Difference > 0, "Europe", "Guiana" )
+GLM_metal$direction <- ifelse(GLM_metal$Difference > 0, "Europe", "Guiana" )
+GLM_biocide$direction <- ifelse(GLM_biocide$Difference > 0, "Europe", "Guiana" )
+
+
+glm_all%>% ggplot(aes(x= Difference, y = -log10(p.adj), label = template)) +
+  geom_point(aes(fill=direction, color = direction)) +
+  geom_text_repel(size = 4)+
+  scale_color_d3() +
+  theme_light() + labs(title = "Infección crónica indeterminada vs Control no infectado")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank())
+
+GLM_abr_filt%>% ggplot(aes(x= Difference, y = -log10(p.adj), label = template)) +
+  geom_point(aes(fill=direction, color = direction)) +
+  geom_text_repel(size = 4, max.iter = 999, max.overlaps = 7)+
+  scale_color_d3() +
+  theme_light() + labs(title = "Infección crónica indeterminada vs Control no infectado")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank())
+
+GLM_bac_filt%>% ggplot(aes(x= Difference, y = -log10(p.adj), label = template)) +
+  geom_point(aes(fill=direction, color = direction)) +
+  geom_text_repel(size = 4, max.iter = 999, max.overlaps = 7)+
+  scale_color_d3() +
+  theme_light() + labs(title = "Infección crónica indeterminada vs Control no infectado")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank())
+
+GLM_biocide_filt%>% ggplot(aes(x= Difference, y = -log10(p.adj), label = template)) +
+  geom_point(aes(fill=direction, color = direction, max.iter = 999, max.overlaps = 7)) +
+  geom_text_repel(size = 4)+
+  scale_color_d3() +
+  theme_light() + labs(title = "Infección crónica indeterminada vs Control no infectado")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank())
+
+GLM_metal_filt%>% ggplot(aes(x= Difference, y = -log10(p.adj), label = template)) +
+  geom_point(aes(fill=direction, color = direction, max.iter = 999, max.overlaps = 7)) +
+  geom_text_repel(size = 4)+
+  scale_color_d3() +
+  theme_light() + labs(title = "Infección crónica indeterminada vs Control no infectado")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank())
+
+
+#positivo europa difference
+```
+
+## GLM ABR
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+GLM_abr_filt%>% ggplot(aes(x= Difference, y = -log10(p.adj), label = template)) +
+  geom_point(aes(fill=direction, color = direction)) +
+  geom_text_repel(size = 4, max.iter = 999, max.overlaps = 7)+
+  scale_color_d3() +
+  theme_light() + labs(title = "Infección crónica indeterminada vs Control no infectado")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank())
+
+```
+
+## GLM BAC
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+GLM_bac_filt%>% ggplot(aes(x= Difference, y = -log10(p.adj), label = template)) +
+  geom_point(aes(fill=direction, color = direction)) +
+  geom_text_repel(size = 4, max.iter = 999, max.overlaps = 7)+
+  scale_color_d3() +
+  theme_light() + labs(title = "Infección crónica indeterminada vs Control no infectado")+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1, legend.position = "none",strip.background = element_blank())
+```
+
+# HEATMAPS {.tabset .tabset-fade .tabset-pills}
+
+```{r DDseq,echo=FALSE,warning=FALSE,message=FALSE}
+
+Anova_tab <- Tabla_inicial %>% select(template,depth,label) %>%  group_by(template) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+Anova_tab <-  column_to_rownames(Anova_tab,var = "template")
+lista_origen <- as.data.frame(colnames(Anova_tab))
+colnames(lista_origen) <- ('label')
+
+
+```
+
+## GLM ALL Heatmap
+
+```{r load glm all, echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+
+heat_padj <- Tabla_inicial %>% filter(template %in% glm_all$template) %>% select(template,depth,label) %>%  group_by(template, label) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+heat_padj <- as.data.frame(heat_padj)
+heat_padj <-  heat_padj %>% column_to_rownames("template")
+
+all_list_of_names <- as.data.frame(colnames(heat_padj))
+colnames(all_list_of_names) <- ("label")
+anti_all <- anti_join(lista_origen,all_list_of_names)
+anti_all_vactor <- as.vector(anti_all$label)
+heat_padj[,anti_all_vactor] <- 0
+```
+
+```{r Heatmap ABR8_8, fig.width=25, fig.height=10}
+pheatmap(log(heat_padj+1), clustering_method = "ward.D2")
+```
+
+## GLM ABR Heatmap
+
+```{r GLM abr, echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+heat_padj_abr <- Tabla_inicial %>% filter(template %in%GLM_abr_filt$template) %>% select(template,depth,label) %>%  group_by(label, template) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+heat_padj_abr <- as.data.frame(heat_padj_abr)
+heat_padj_abr <-  heat_padj_abr %>% column_to_rownames("template")
+
+abr_list_of_names <- as.data.frame(colnames(heat_padj_abr))
+colnames(abr_list_of_names) <- ("label")
+anti_abr <- anti_join(lista_origen,abr_list_of_names)
+anti_abr_vactor <- as.vector(anti_abr$label)
+heat_padj_abr[,anti_abr_vactor] <- 0
+```
+
+```{r glmabr5, fig.width=25, fig.height=10}
+pheatmap(log(heat_padj_abr+1), clustering_method = "ward.D2")
+```
+
+
+
+
+## GLM BAC Heatmap
+
+```{r load BAC metal1,echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+
+heat_padj_bac <- Tabla_inicial %>% filter(template %in% GLM_bac_filt$template) %>% select(template,depth,label) %>%  group_by(label, template) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+heat_padj_bac <- as.data.frame(heat_padj_bac)
+heat_padj_bac <-  heat_padj_bac %>% column_to_rownames("template")
+bac_list_of_names <- as.data.frame(colnames(heat_padj_bac))
+colnames(bac_list_of_names) <- ("label")
+anti_bac <- anti_join(lista_origen,bac_list_of_names)
+anti_bac_vactor <- as.vector(anti_bac$label)
+heat_padj_bac[,anti_bac_vactor] <- 0
+heat_padj_bac <- heat_padj_bac
+```
+
+```{r Heatmaps BAC metal1 , fig.width=15, fig.height=8}
+pheatmap(log(heat_padj_bac+1), clustering_method = "ward.D2")
+
+```
+
+## FISHER ALL Heatmap
+
+```{r load ABR, echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+
+heat_padj <- Tabla_inicial %>% filter(template %in% chi_pvalue.adj$template) %>% select(template,depth,label) %>%  group_by(template, label) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+heat_padj <- as.data.frame(heat_padj)
+heat_padj <-  heat_padj %>% column_to_rownames("template")
+
+all_list_of_names <- as.data.frame(colnames(heat_padj))
+colnames(all_list_of_names) <- ("label")
+anti_all <- anti_join(lista_origen,all_list_of_names)
+anti_all_vactor <- as.vector(anti_all$label)
+heat_padj[,anti_all_vactor] <- 0
+```
+
+```{r Heatmap ABR8, fig.width=25, fig.height=10}
+pheatmap(log(heat_padj+1), clustering_method = "ward.D2")
+```
+
+## FISHER ABR Heatmap
+
+```{r load ABR1, echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+chi_pvalue.adj_heat_abr <- chi_pvalue.adj %>% filter(database == "ABR")
+
+heat_padj_abr <- Tabla_inicial %>% filter(template %in%chi_pvalue.adj_heat_abr$template) %>% select(template,depth,label) %>%  group_by(label, template) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+heat_padj_abr <- as.data.frame(heat_padj_abr)
+heat_padj_abr <-  heat_padj_abr %>% column_to_rownames("template")
+
+abr_list_of_names <- as.data.frame(colnames(heat_padj_abr))
+colnames(abr_list_of_names) <- ("label")
+anti_abr <- anti_join(lista_origen,abr_list_of_names)
+anti_abr_vactor <- as.vector(anti_abr$label)
+heat_padj_abr[,anti_abr_vactor] <- 0
+```
+
+```{r Heatmap ABR15, fig.width=25, fig.height=10}
+pheatmap(log(heat_padj_abr+1), clustering_method = "ward.D2")
+```
+
+Heatmap of the Antimicrobial resistance genes. The genes that appear on the y axis and the individuals of the x axis were previously selected From an ANOVA test with p-value lower than 0,05 in. Red indicates the highest value of appearance of the gene in the population and blue the contrary.
+
+
+Heatmap of the Relaxases resistance genes. The genes that appear on the y axis and the individuals of the x axis were previously selected From an ANOVA test with p-value lower than 0,05 in. Red indicates the highest value of appearance of the gene in the population and blue the contrary.
+
+## FISEHR BAC METAL Heatmap
+
+```{r load BAC metal,echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+tmp_info <- Tabla_inicial_info %>% select(template_gene, database, database_BAC, Gene_name) %>% distinct()%>% filter(database_BAC == "BAC_Metal") %>% rename(template = template_gene)
+
+
+chi_pvalue.adj_heat_metal <- left_join(chi_pvalue.adj, tmp_info, by = "template")%>% filter(database_BAC == "BAC_Metal")
+
+
+heat_padj_bac <- Tabla_inicial %>% filter(template %in% chi_pvalue.adj_heat_metal$template) %>% select(template,depth,label) %>%  group_by(label, template) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+heat_padj_bac <- as.data.frame(heat_padj_bac)
+heat_padj_bac <-  heat_padj_bac %>% column_to_rownames("template")
+bac_list_of_names <- as.data.frame(colnames(heat_padj_bac))
+colnames(bac_list_of_names) <- ("label")
+anti_bac <- anti_join(lista_origen,bac_list_of_names)
+anti_bac_vactor <- as.vector(anti_bac$label)
+heat_padj_bac[,anti_bac_vactor] <- 0
+heat_padj_bac <- heat_padj_bac
+```
+
+```{r Heatmaps BAC metal , fig.width=15, fig.height=8}
+pheatmap(log(heat_padj_bac+1), clustering_method = "ward.D2")
+
+```
+
+Heatmap of the Biocides and metals resistance genes. The genes that appear on the y axis and the individuals of the x axis were previously selected From an ANOVA test with p-value lower than 0,05 in. Red indicates the highest value of appearance of the gene in the population and blue the contrary.
+
+## FISEHR BAC Biocide Heatmap
+
+```{r load BAC,echo=FALSE,warning=FALSE,message=FALSE,include=FALSE}
+
+tmp_info <- Tabla_inicial_info %>% select(template_gene, database, database_BAC) %>% distinct()%>% filter(database_BAC == "BAC_Biocide") %>% rename(template = template_gene)
+
+chi_pvalue.adj_heat_Biocide <- left_join(chi_pvalue.adj, tmp_info, by = "template")%>% filter(database_BAC == "BAC_Biocide")
+
+
+heat_padj_bac <- Tabla_inicial %>% filter(template %in% chi_pvalue.adj_heat_Biocide$template) %>% select(template,depth,label) %>%  group_by(label, template) %>% mutate(depth = sum(depth)) %>% distinct() %>% spread(label,depth, fill = 0)
+heat_padj_bac <- as.data.frame(heat_padj_bac)
+# heat_padj_bac$template <-  sub( "_.*" ," ", heat_padj_bac$template)
+heat_padj_bac <-  heat_padj_bac %>% column_to_rownames("template")
+bac_list_of_names <- as.data.frame(colnames(heat_padj_bac))
+colnames(bac_list_of_names) <- ("label")
+anti_bac <- anti_join(lista_origen,bac_list_of_names)
+anti_bac_vactor <- as.vector(anti_bac$label)
+heat_padj_bac[,anti_bac_vactor] <- 0
+heat_padj_bac <- heat_padj_bac
+```
+
+```{r Heatmaps BAC biocide , fig.width=15, fig.height=8}
+pheatmap(log(heat_padj_bac+1), clustering_method = "ward.D2")
+
+```
+
+
+
+# Metadata {.tabset .tabset-fade .tabset-pills}
+
+```{r Metadata,  echo=FALSE, warning=FALSE,message=FALSE,include=FALSE}
+tabla_metadata = rename(tabla_metadata, dataset = id)
+tabla_metadata <- left_join(tabla_metadata, tabla_label, by = 'dataset') %>% select(-dataset)
+tabla_metadata_bin = rename(tabla_metadata_bin, dataset = id)
+tabla_metadata_bin <- left_join(tabla_metadata_bin, tabla_label, by = 'dataset') %>% select(-dataset)
+
+
+names <- unique(Tabla_inicial$label)
+
+tabla_metadata <- filter(tabla_metadata, label %in% names)
+tabla_metadata_rownames <- column_to_rownames(tabla_metadata,  var = 'label')
+
+tabla_metadata_bin <- filter(tabla_metadata_bin, label %in% names)
+tabla_metadata_bin_rownames <- column_to_rownames(tabla_metadata_bin,  var = 'label')
+
+Guayana_spread_t <- rownames_to_column(Guayana_spread, var = 'label') 
+Guayana_spread_t <- left_join(Guayana_spread_t, tabla_metadata) %>% filter(origin == "guayana") %>% select(-origin)
+Guayana_spread_t <- column_to_rownames(Guayana_spread_t,  var = 'label')
+
+Guayana_spread_t_ABR <- rownames_to_column(Guayana_spread_ABR, var = 'label') 
+Guayana_spread_t_ABR <- left_join(Guayana_spread_t_ABR, tabla_metadata)%>% filter(origin == "guayana") %>% select(-origin)
+Guayana_spread_t_ABR <- column_to_rownames(Guayana_spread_t_ABR,  var = 'label')
+
+Guayana_spread_t_BAC <- rownames_to_column(Guayana_spread_BAC, var = 'label') 
+Guayana_spread_t_BAC <- left_join(Guayana_spread_t_BAC, tabla_metadata)%>% filter(origin == "guayana") %>% select(-origin)
+Guayana_spread_t_BAC <- column_to_rownames(Guayana_spread_t_BAC,  var = 'label')
+
+Guayana_spread_BAC_Metal_t <- rownames_to_column(Guayana_spread_BAC_Metal, var = 'label') 
+Guayana_spread_BAC_Metal_t <- left_join(Guayana_spread_BAC_Metal_t, tabla_metadata)%>% filter(origin == "guayana") %>% select(-origin)
+Guayana_spread_BAC_Metal_t <- column_to_rownames(Guayana_spread_BAC_Metal_t,  var = 'label')
+
+Guayana_spread_BAC_Biocide_t <- rownames_to_column(Guayana_spread_BAC_Biocide, var = 'label') 
+Guayana_spread_BAC_Biocide_t <- left_join(Guayana_spread_BAC_Biocide_t, tabla_metadata)%>% filter(origin == "guayana") %>% select(-origin)
+Guayana_spread_BAC_Biocide_t <- column_to_rownames(Guayana_spread_BAC_Biocide_t,  var = 'label')
+
+
+meta_all <- adonis2(Guayana_spread_t[,1:13895]~age+gender+carb_06+number_hab_house+village+decade+marital_situatoin+nbenf+child_educatoin+water_creek+water_river+water_tap+animal_dom+chicken+dog+cat+Hunting+Fishing+stay_outside_prolonged+stay_outside_freq+voyage+travel_camopi+travel_cay+travel_stg+other_travel+preparing_food+preparing_cachi+boat_driver+Community_worker+House_06+pregnant+hosp4an+chir4an+vacc1an+blse+atb+nb_atb+ttpeni2, data = Guayana_spread_t,perm=9999, parallel = 24)
+
+meta_abr <- adonis2(Guayana_spread_t_ABR[,1:367]~age+gender+carb_06+number_hab_house+village+decade+marital_situatoin+nbenf+child_educatoin+water_creek+water_river+water_tap+animal_dom+chicken+dog+cat+Hunting+Fishing+stay_outside_prolonged+stay_outside_freq+voyage+travel_camopi+travel_cay+travel_stg+other_travel+preparing_food+preparing_cachi+boat_driver+Community_worker+House_06+pregnant+hosp4an+chir4an+vacc1an+blse+atb+nb_atb+ttpeni2, data = Guayana_spread_t_ABR,perm=9999, parallel = 24)
+
+meta_bac <- adonis2(Guayana_spread_t_BAC[,1:13528]~age+gender+carb_06+number_hab_house+village+decade+marital_situatoin+nbenf+child_educatoin+water_creek+water_river+water_tap+animal_dom+chicken+dog+cat+Hunting+Fishing+stay_outside_prolonged+stay_outside_freq+voyage+travel_camopi+travel_cay+travel_stg+other_travel+preparing_food+preparing_cachi+boat_driver+Community_worker+House_06+pregnant+hosp4an+chir4an+vacc1an+blse+atb+nb_atb+ttpeni2, data = Guayana_spread_t_BAC,perm=9999, parallel = 24)
+
+
+meta_bac_metal <- adonis2(Guayana_spread_BAC_Metal_t[8300]~age+gender+carb_06+number_hab_house+village+decade+marital_situatoin+nbenf+child_educatoin+water_creek+water_river+water_tap+animal_dom+chicken+dog+cat+Hunting+Fishing+stay_outside_prolonged+stay_outside_freq+voyage+travel_camopi+travel_cay+travel_stg+other_travel+preparing_food+preparing_cachi+boat_driver+Community_worker+House_06+pregnant+hosp4an+chir4an+vacc1an+blse+atb+nb_atb+ttpeni2, data = Guayana_spread_BAC_Metal_t,perm=9999, parallel = 24)
+
+
+meta_bac_biocide <- adonis2(Guayana_spread_BAC_Biocide_t[,1:6625]~age+gender+carb_06+number_hab_house+village+decade+marital_situatoin+nbenf+child_educatoin+water_creek+water_river+water_tap+animal_dom+chicken+dog+cat+Hunting+Fishing+stay_outside_prolonged+stay_outside_freq+voyage+travel_camopi+travel_cay+travel_stg+other_travel+preparing_food+preparing_cachi+boat_driver+Community_worker+House_06+pregnant+hosp4an+chir4an+vacc1an+blse+atb+nb_atb+ttpeni2, data = Guayana_spread_BAC_Biocide_t,perm=9999, parallel = 24)
+
+
+
+```
+
+## metadata suma
+
+```{r}
+meta_all<- meta_all  %>% filter(Df > 0)%>%  filter(`Pr(>F)` < 0.05) %>% rownames_to_column(var = "term")
+meta_abr<- meta_abr %>% filter(Df > 0) %>%  filter(`Pr(>F)` < 0.05)%>% rownames_to_column(var = "term")
+meta_bac<- meta_bac %>% filter(Df > 0) %>%  filter(`Pr(>F)` < 0.05)%>% rownames_to_column(var = "term")
+meta_bac_metal<- meta_bac_metal %>% filter(Df > 0) %>%  filter(`Pr(>F)` < 0.05)%>% rownames_to_column(var = "term")
+meta_bac_biocide<- meta_bac_biocide %>% filter(Df > 0) %>%  filter(`Pr(>F)` < 0.05)%>% rownames_to_column(var = "term")
+
+meta_all$lib <- "ALL"
+meta_abr$lib <- "ABR"
+meta_bac$lib <- "BAC"
+meta_bac_metal$lib <- "BAC_biocide"   
+meta_bac_biocide$lib <- "BAC_biocide"
+
+meta <- rbind(meta_all, meta_abr,meta_bac, meta_bac_metal, meta_bac_biocide)
+
+metameta <- meta
+
+metameta$label <- ifelse(metameta$`Pr(>F)`<0.01, "0.01",  ifelse(metameta$`Pr(>F)`<0.02, "0.02",  ifelse(metameta$`Pr(>F)`<0.03, "0.03",  ifelse(metameta$`Pr(>F)`<0.04, "0.04",  ifelse(metameta$`Pr(>F)`<0.05, "0.05", "XD")))))
+
+meta %>% ggplot(aes(x=lib, y=term)) + geom_tile(aes(fill=`Pr(>F)`))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1,strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+metameta %>% ggplot(aes(x=lib, y=term)) + geom_tile(aes(fill=label))+
+  theme_classic()+
+  theme(panel.background = element_blank(), panel.grid = element_blank(), 
+        aspect.ratio = 1,strip.background = element_blank(), 
+        axis.text.x = element_text(angle = 45,  hjust=1))
+
+```
